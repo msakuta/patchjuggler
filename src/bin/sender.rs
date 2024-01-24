@@ -1,13 +1,14 @@
 use eframe::{
     egui::{self, Color32, Context, Frame},
-    epaint::{pos2, Pos2, Rect},
+    emath::Align2,
+    epaint::{pos2, FontId, Pos2, Rect},
 };
 use rand::prelude::*;
 use std::{
     error::Error,
     net::UdpSocket,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
 };
@@ -18,6 +19,7 @@ const MOTION: f64 = 0.1;
 
 struct Shared {
     objs: Mutex<Vec<Object>>,
+    total_amt: AtomicUsize,
     exit_signal: AtomicBool,
 }
 
@@ -31,6 +33,7 @@ fn main() -> Result<(), String> {
                 })
                 .collect(),
         ),
+        total_amt: AtomicUsize::new(0),
         exit_signal: AtomicBool::new(false),
     });
 
@@ -86,6 +89,7 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         }
 
         println!("[{i}] Sent {amt} bytes!");
+        shared.total_amt.fetch_add(amt, Ordering::Relaxed);
 
         for obj in objs.iter_mut() {
             obj.pos[0] += (rng.gen::<f64>() - 0.5) * MOTION;
@@ -136,6 +140,17 @@ impl eframe::App for SenderApp {
                         (1., Color32::BLACK),
                     );
                 }
+
+                painter.text(
+                    response.rect.left_top(),
+                    Align2::LEFT_TOP,
+                    format!(
+                        "Sent {} bytes",
+                        self.shared.total_amt.load(Ordering::Relaxed)
+                    ),
+                    FontId::proportional(16.),
+                    Color32::BLACK,
+                );
             });
         });
     }
