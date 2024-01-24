@@ -1,3 +1,4 @@
+use clap::Parser;
 use eframe::{
     egui::{self, Color32, Context, Frame},
     emath::Align2,
@@ -7,7 +8,7 @@ use rand::prelude::*;
 use std::{
     error::Error,
     mem::size_of,
-    net::UdpSocket,
+    net::{Ipv4Addr, UdpSocket},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
@@ -20,14 +21,57 @@ use patchjuggler::{Object, NUM_OBJS, SCALE};
 const MOTION: f64 = 0.1;
 
 struct Shared {
+    args: Args,
     objs: Mutex<Vec<Object>>,
     total_amt: AtomicUsize,
     exit_signal: AtomicBool,
 }
 
+#[derive(Parser, Clone, Debug)]
+#[clap(author, version, about)]
+struct Args {
+    #[clap(
+        short = 'p',
+        long,
+        default_value = "34254",
+        help = "The port number to send packets to."
+    )]
+    dest_port: u16,
+    #[clap(
+        short = 'h',
+        long,
+        default_value = "127.0.0.1",
+        help = "The host address to send packets to."
+    )]
+    dest_host: Ipv4Addr,
+    #[clap(
+        short = 'P',
+        long,
+        default_value = "34255",
+        help = "The port number of the sender's socket."
+    )]
+    src_port: u16,
+    #[clap(
+        short = 'H',
+        long,
+        default_value = "127.0.0.1",
+        help = "Interval to auto-cleanup cache memory, in seconds."
+    )]
+    src_host: Ipv4Addr,
+    #[clap(
+        short = 'r',
+        long,
+        default_value = "10",
+        help = "The rate at which packets are sent in milliseconds"
+    )]
+    rate: u64,
+}
+
 fn main() -> Result<(), String> {
+    let args = Args::parse();
     let mut rng = rand::thread_rng();
     let shared = Arc::new(Shared {
+        args,
         objs: Mutex::new(
             (0..NUM_OBJS)
                 .map(|_| {
@@ -73,13 +117,13 @@ fn gui_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
 
 fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
     std::thread::sleep(std::time::Duration::from_millis(1000));
-    let socket = UdpSocket::bind("127.0.0.1:34255")?;
+    let socket = UdpSocket::bind((shared.args.src_host, shared.args.src_port))?;
     let mut t = 0;
     let mut rng = rand::thread_rng();
     loop {
-        let addr = "127.0.0.1:34254";
+        let addr = (shared.args.dest_host, shared.args.dest_port);
 
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_millis(shared.args.rate));
 
         if shared.exit_signal.load(Ordering::Relaxed) {
             return Ok(());
@@ -91,7 +135,7 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
             let mut buf = [0u8; size_of::<usize>() + size_of::<Object>()];
             i.write_to(&mut buf[..size_of::<usize>()]);
             obj.write_to(&mut buf[size_of::<usize>()..]);
-            amt += socket.send_to(&buf, addr)?;
+            amt += socket.send_to(&buf, &addr)?;
         }
 
         // Don't print to terminal too often
