@@ -6,12 +6,14 @@ use eframe::{
 use rand::prelude::*;
 use std::{
     error::Error,
+    mem::size_of,
     net::UdpSocket,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
 };
+use zerocopy::AsBytes;
 
 use patchjuggler::{Object, NUM_OBJS, SCALE};
 
@@ -28,9 +30,11 @@ fn main() -> Result<(), String> {
     let shared = Arc::new(Shared {
         objs: Mutex::new(
             (0..NUM_OBJS)
-                .map(|_| Object {
-                    pos: [rng.gen::<f64>() * 10., rng.gen::<f64>() * 10.],
-                    color: [rng.gen::<u8>(), rng.gen(), rng.gen()],
+                .map(|_| {
+                    Object::new(
+                        [rng.gen::<f64>() * 10., rng.gen::<f64>() * 10.],
+                        [rng.gen::<u8>(), rng.gen(), rng.gen()],
+                    )
                 })
                 .collect(),
         ),
@@ -70,7 +74,7 @@ fn gui_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
 fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
     std::thread::sleep(std::time::Duration::from_millis(1000));
     let socket = UdpSocket::bind("127.0.0.1:34255")?;
-    let mut i = 0;
+    let mut t = 0;
     let mut rng = rand::thread_rng();
     loop {
         let addr = "127.0.0.1:34254";
@@ -84,12 +88,16 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         let mut objs = shared.objs.lock().unwrap();
         let mut amt = 0;
         for (i, obj) in objs.iter().enumerate() {
-            amt += socket.send_to(&i.to_le_bytes(), addr)?;
-            let buf: [u8; std::mem::size_of::<Object>()] = unsafe { std::mem::transmute(*obj) };
+            let mut buf = [0u8; size_of::<usize>() + size_of::<Object>()];
+            i.write_to(&mut buf[..size_of::<usize>()]);
+            obj.write_to(&mut buf[size_of::<usize>()..]);
             amt += socket.send_to(&buf, addr)?;
         }
 
-        println!("[{i}] Sent {amt} bytes!");
+        // Don't print to terminal too often
+        if t % 100 == 0 {
+            println!("[{t}] Sent {amt} bytes!");
+        }
         shared.total_amt.fetch_add(amt, Ordering::Relaxed);
 
         for obj in objs.iter_mut() {
@@ -107,7 +115,7 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         //     "[{i}] Received response of {amt} bytes from {addr:?}! {:?}",
         //     &buf[..amt]
         // );
-        i += 1;
+        t += 1;
     } // the socket is closed here
       // Ok(())
 }

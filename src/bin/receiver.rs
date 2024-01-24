@@ -5,12 +5,14 @@ use eframe::{
 };
 use std::{
     error::Error,
+    mem::size_of,
     net::UdpSocket,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
 };
+use zerocopy::FromBytes;
 
 use patchjuggler::{Object, NUM_OBJS, SCALE};
 
@@ -61,24 +63,24 @@ fn receiver_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         if shared.exit_signal.load(Ordering::Relaxed) {
             return Ok(());
         }
-        let mut buf = [0; std::mem::size_of::<usize>()];
+        let mut buf = [0; size_of::<usize>() + size_of::<Object>()];
         let (amt1, _src) = socket.recv_from(&mut buf)?;
-        let i = usize::from_le_bytes(buf);
-        let mut buf = [0; std::mem::size_of::<Object>()];
-        let (amt2, _src) = socket.recv_from(&mut buf)?;
+        let i = usize::read_from(&buf[..size_of::<usize>()]).unwrap();
+        let buf = Object::ref_from(&buf[size_of::<usize>()..]).unwrap();
+        // let mut buf = [0; ];
+        // let (amt2, _src) = socket.recv_from(&mut buf)?;
 
-        let total_amt = amt1 + amt2;
-        shared.total_amt.fetch_add(total_amt, Ordering::Relaxed);
+        shared.total_amt.fetch_add(amt1, Ordering::Relaxed);
 
         let mut objs = shared.objs.lock().unwrap();
         if i < objs.len() {
-            unsafe {
-                objs[i] = std::mem::transmute(buf);
-            }
-            // println!(
-            //     "[{t}]: Received {total_amt} bytes from {src:?}: {i} = {:?}!",
-            //     objs[i]
-            // );
+            objs[i] = *buf;
+            // if i == 0 {
+            //     println!(
+            //         "[{t}]: Received {amt1} bytes from {_src:?}: {i} = {:?}!",
+            //         objs[i]
+            //     );
+            // }
         }
         drop(objs);
 

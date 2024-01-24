@@ -8,6 +8,8 @@ edition = "2021"
 [dependencies]
 eframe = "0.25.0"
 rand = "0.8.5"
+zerocopy = "0.7.32"
+zerocopy-derive = "0.7.32"
 
 [[bin]]
 name = "sender"
