@@ -1,31 +1,38 @@
 use std::net::UdpSocket;
 
-use juggler::Object;
+use juggler::{Object, NUM_OBJS};
 
 fn main() -> std::io::Result<()> {
     let socket = UdpSocket::bind("127.0.0.1:34254")?;
-    let mut i = 0;
-    let mut objs = vec![Object { pos: [32., 21.] }];
+    let mut t = 0;
+    let mut objs: Vec<_> = (0..NUM_OBJS).map(|_| Object { pos: [0., 0.] }).collect();
     loop {
-        // Receives a single datagram message on the socket. If `buf` is too small to hold
-        // the message, it will be cut off.
+        let mut buf = [0; std::mem::size_of::<usize>()];
+        let (amt1, _src) = socket.recv_from(&mut buf)?;
+        let i = usize::from_le_bytes(buf);
         let mut buf = [0; std::mem::size_of::<Object>()];
-        let (amt, src) = socket.recv_from(&mut buf)?;
+        let (amt2, src) = socket.recv_from(&mut buf)?;
 
-        unsafe {
-            objs[0] = std::mem::transmute(buf);
+        let total_amt = amt1 + amt2;
+
+        if i < objs.len() {
+            unsafe {
+                objs[i] = std::mem::transmute(buf);
+            }
+            println!(
+                "[{t}]: Received {total_amt} bytes from {src:?}: {i} = {:?}!",
+                objs[i]
+            );
         }
 
-        println!("[{i}]: Received from {src:?}: {:?}!", objs[0]);
-
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        // std::thread::sleep(std::time::Duration::from_millis(1000));
 
         // Redeclare `buf` as slice of the received data and send reverse data back to origin.
-        let buf = &mut buf[..amt];
-        buf.reverse();
-        let amt = socket.send_to(buf, &src)?;
-        println!("[{i}]: Sent {amt} bytes!");
-        i += 1;
+        // let buf = &mut buf[..amt];
+        // buf.reverse();
+        // let amt = socket.send_to(buf, &src)?;
+        // println!("[{i}]: Sent {amt} bytes!");
+        t += 1;
     }
     // Ok(())
 }
