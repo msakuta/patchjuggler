@@ -12,7 +12,7 @@ use std::{
     },
 };
 
-use juggler::{Object, NUM_OBJS, SCALE};
+use patchjuggler::{Object, NUM_OBJS, SCALE};
 
 struct Shared {
     objs: Mutex<Vec<Object>>,

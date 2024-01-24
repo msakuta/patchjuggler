@@ -13,7 +13,7 @@ use std::{
     },
 };
 
-use juggler::{Object, NUM_OBJS, SCALE};
+use patchjuggler::{Object, NUM_OBJS, SCALE};
 
 const MOTION: f64 = 0.1;
 
