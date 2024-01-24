@@ -65,7 +65,7 @@ fn receiver_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         let (amt1, _src) = socket.recv_from(&mut buf)?;
         let i = usize::from_le_bytes(buf);
         let mut buf = [0; std::mem::size_of::<Object>()];
-        let (amt2, src) = socket.recv_from(&mut buf)?;
+        let (amt2, _src) = socket.recv_from(&mut buf)?;
 
         let total_amt = amt1 + amt2;
         shared.total_amt.fetch_add(total_amt, Ordering::Relaxed);

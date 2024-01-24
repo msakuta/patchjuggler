@@ -74,7 +74,7 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
     loop {
         let addr = "127.0.0.1:34254";
 
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(10));
 
         if shared.exit_signal.load(Ordering::Relaxed) {
             return Ok(());
