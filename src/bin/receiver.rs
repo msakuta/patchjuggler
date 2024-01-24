@@ -1,3 +1,4 @@
+use clap::Parser;
 use eframe::{
     egui::{self, Color32, Context, Frame},
     emath::Align2,
@@ -6,7 +7,7 @@ use eframe::{
 use std::{
     error::Error,
     mem::size_of,
-    net::UdpSocket,
+    net::{Ipv4Addr, UdpSocket},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
@@ -17,13 +18,34 @@ use zerocopy::FromBytes;
 use patchjuggler::{Object, NUM_OBJS, SCALE};
 
 struct Shared {
+    args: Args,
     objs: Mutex<Vec<Object>>,
     total_amt: AtomicUsize,
     exit_signal: AtomicBool,
 }
 
+#[derive(Parser, Clone, Debug)]
+#[clap(author, version, about)]
+struct Args {
+    #[clap(
+        short = 'p',
+        long,
+        default_value = "34254",
+        help = "The port number of the receiver's socket."
+    )]
+    port: u16,
+    #[clap(
+        short = 'h',
+        long,
+        default_value = "127.0.0.1",
+        help = "The address of the receiver's socket."
+    )]
+    host: Ipv4Addr,
+}
+
 fn main() -> Result<(), String> {
     let shared = Arc::new(Shared {
+        args: Args::parse(),
         objs: Mutex::new((0..NUM_OBJS).map(|_| Object::default()).collect()),
         total_amt: AtomicUsize::new(0),
         exit_signal: AtomicBool::new(false),
@@ -57,8 +79,8 @@ fn gui_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
 }
 
 fn receiver_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
-    let socket = UdpSocket::bind("127.0.0.1:34254")?;
-    let mut t = 0;
+    let socket = UdpSocket::bind((shared.args.host, shared.args.port))?;
+    let mut _t = 0;
     loop {
         if shared.exit_signal.load(Ordering::Relaxed) {
             return Ok(());
@@ -67,8 +89,6 @@ fn receiver_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         let (amt1, _src) = socket.recv_from(&mut buf)?;
         let i = usize::read_from(&buf[..size_of::<usize>()]).unwrap();
         let buf = Object::ref_from(&buf[size_of::<usize>()..]).unwrap();
-        // let mut buf = [0; ];
-        // let (amt2, _src) = socket.recv_from(&mut buf)?;
 
         shared.total_amt.fetch_add(amt1, Ordering::Relaxed);
 
@@ -84,14 +104,7 @@ fn receiver_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         }
         drop(objs);
 
-        // std::thread::sleep(std::time::Duration::from_millis(1000));
-
-        // Redeclare `buf` as slice of the received data and send reverse data back to origin.
-        // let buf = &mut buf[..amt];
-        // buf.reverse();
-        // let amt = socket.send_to(buf, &src)?;
-        // println!("[{i}]: Sent {amt} bytes!");
-        t += 1;
+        _t += 1;
     }
     // Ok(())
 }
