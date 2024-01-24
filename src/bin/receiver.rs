@@ -22,7 +22,7 @@ struct Shared {
 
 fn main() -> Result<(), String> {
     let shared = Arc::new(Shared {
-        objs: Mutex::new((0..NUM_OBJS).map(|_| Object { pos: [0., 0.] }).collect()),
+        objs: Mutex::new((0..NUM_OBJS).map(|_| Object::default()).collect()),
         total_amt: AtomicUsize::new(0),
         exit_signal: AtomicBool::new(false),
     });
@@ -119,7 +119,7 @@ impl eframe::App for ReceiverApp {
                             obj.pos[1] as f32 * SCALE,
                         )),
                         3.,
-                        Color32::from_rgb(191, 191, 191),
+                        Color32::from_rgb(obj.color[0], obj.color[1], obj.color[2]),
                         (1., Color32::BLACK),
                     );
                 }

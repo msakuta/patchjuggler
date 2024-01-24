@@ -30,6 +30,7 @@ fn main() -> Result<(), String> {
             (0..NUM_OBJS)
                 .map(|_| Object {
                     pos: [rng.gen::<f64>() * 10., rng.gen::<f64>() * 10.],
+                    color: [rng.gen::<u8>(), rng.gen(), rng.gen()],
                 })
                 .collect(),
         ),
@@ -136,7 +137,7 @@ impl eframe::App for SenderApp {
                             obj.pos[1] as f32 * SCALE,
                         )),
                         3.,
-                        Color32::from_rgb(191, 191, 191),
+                        Color32::from_rgb(obj.color[0], obj.color[1], obj.color[2]),
                         (1., Color32::BLACK),
                     );
                 }
