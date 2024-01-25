@@ -22,3 +22,7 @@ They should show very similar windows like below. They should be identical if th
 It is very likely that they are actually identical if you are running the programs in the same computer, because the packets are not actually sent over the network.
 
 ![screenshot](images/screenshot.png)
+
+# Boids simulation
+
+See [this document](BOID.md) for more description for the boids simulation model.
