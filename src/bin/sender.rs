@@ -16,21 +16,16 @@ use std::{
 };
 use zerocopy::AsBytes;
 
-use patchjuggler::{Object, DELTA_TIME, SCALE, SPACE_WIDTH};
+use patchjuggler::{Object, SCALE, SPACE_WIDTH};
 
 const RANDOM_MOTION: f64 = 5e-3;
 const SEPARATION: f64 = 5e-3;
 const SEPARATION_DIST: f64 = 0.2;
 const PREDICTION_TIME: f64 = 0.;
-const WALL_REPULSION: f64 = 5e-2;
-const WALL_REPULSION_DIST: f64 = 0.5;
 const ALIGNMENT: f64 = 1e-2;
 const ALIGNMENT_DIST: f64 = 0.7;
 const COHESION: f64 = 1e-4;
 const COHESION_DIST: f64 = 0.7;
-const MIN_SPEED: f64 = 0.25;
-const MAX_SPEED: f64 = 0.5;
-const SPEED_ADAPT: f64 = 1e-2;
 const DRAG: f64 = 0.;
 
 struct Shared {
@@ -207,27 +202,9 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
             for axis in [0, 1] {
                 obj.velo[axis] +=
                     force[axis] + (rng.gen::<f64>() - 0.5) * RANDOM_MOTION - obj.velo[axis] * DRAG;
-                if obj.pos[axis] < WALL_REPULSION_DIST {
-                    obj.velo[axis] += WALL_REPULSION;
-                } else if SPACE_WIDTH - WALL_REPULSION_DIST < obj.pos[axis] {
-                    obj.velo[axis] -= WALL_REPULSION;
-                }
                 if 0 < cohesion_count {
                     obj.velo[axis] += cohesion[axis] / cohesion_count as f64;
                 }
-            }
-
-            let vx = obj.velo[0];
-            let vy = obj.velo[1];
-            let speed2 = vx.powi(2) + vy.powi(2);
-            if 0. < speed2 && speed2 < MIN_SPEED.powi(2) {
-                let speed = speed2.sqrt();
-                obj.velo[0] += vx / speed * SPEED_ADAPT;
-                obj.velo[1] += vy / speed * SPEED_ADAPT;
-            } else if MAX_SPEED.powi(2) < speed2 {
-                let speed = speed2.sqrt();
-                obj.velo[0] -= vx / speed * SPEED_ADAPT;
-                obj.velo[1] -= vy / speed * SPEED_ADAPT;
             }
 
             obj.time_step();
