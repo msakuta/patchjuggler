@@ -26,6 +26,8 @@ const ALIGNMENT: f64 = 1e-2;
 const ALIGNMENT_DIST: f64 = 0.7;
 const COHESION: f64 = 1e-4;
 const COHESION_DIST: f64 = 0.7;
+const GROUP_SEPARATION: f64 = 2e-3;
+const GROUP_SEPARATION_DIST: f64 = 1.5;
 const DRAG: f64 = 0.;
 
 struct Shared {
@@ -197,6 +199,9 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
                     cohesion[0] += COHESION * dx / dist;
                     cohesion[1] += COHESION * dy / dist;
                     cohesion_count += 1;
+                } else if dist < GROUP_SEPARATION_DIST {
+                    force[0] += GROUP_SEPARATION * dx / dist * (1. - dist / GROUP_SEPARATION_DIST);
+                    force[1] += GROUP_SEPARATION * dy / dist * (1. - dist / GROUP_SEPARATION_DIST);
                 }
             }
             for axis in [0, 1] {
