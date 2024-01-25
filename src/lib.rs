@@ -1,7 +1,13 @@
+mod render;
+
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes};
+
+pub use render::render_objects;
 
 pub const DELTA_TIME: f64 = 1. / 20.;
 pub const SPACE_WIDTH: f64 = 10.;
+pub const NUM_OBJS: usize = 1000;
+pub const SCALE: f32 = 50.;
 const WALL_REPULSION: f64 = 5e-2;
 const WALL_REPULSION_DIST: f64 = 0.5;
 const MIN_SPEED: f64 = 0.25;
@@ -53,6 +59,3 @@ impl Object {
         }
     }
 }
-
-pub const NUM_OBJS: usize = 1000;
-pub const SCALE: f32 = 50.;

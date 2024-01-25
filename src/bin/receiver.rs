@@ -2,7 +2,7 @@ use clap::Parser;
 use eframe::{
     egui::{self, Color32, Context, Frame},
     emath::Align2,
-    epaint::{pos2, FontId, Pos2, Rect},
+    epaint::FontId,
 };
 use std::{
     error::Error,
@@ -15,7 +15,7 @@ use std::{
 };
 use zerocopy::FromBytes;
 
-use patchjuggler::{Object, SCALE};
+use patchjuggler::{render_objects, Object};
 
 struct Shared {
     args: Args,
@@ -129,26 +129,12 @@ impl eframe::App for ReceiverApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
-                let (response, painter) =
-                    ui.allocate_painter(ui.available_size(), egui::Sense::click());
-
-                let to_screen = egui::emath::RectTransform::from_to(
-                    Rect::from_min_size(Pos2::ZERO, response.rect.size()),
-                    response.rect,
-                );
-
-                for obj in self.shared.objs.lock().unwrap().iter_mut() {
+                let mut objs = self.shared.objs.lock().unwrap();
+                for obj in objs.iter_mut() {
                     obj.time_step();
-                    painter.circle(
-                        to_screen.transform_pos(pos2(
-                            obj.pos[0] as f32 * SCALE,
-                            obj.pos[1] as f32 * SCALE,
-                        )),
-                        3.,
-                        Color32::from_rgb(obj.color[0], obj.color[1], obj.color[2]),
-                        (1., Color32::BLACK),
-                    );
                 }
+                let (response, painter) = render_objects(&objs, ui);
+                drop(objs); // Release the mutex ASAP
 
                 painter.text(
                     response.rect.left_top(),

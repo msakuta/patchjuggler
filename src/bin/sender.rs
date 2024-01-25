@@ -1,8 +1,8 @@
 use clap::Parser;
 use eframe::{
-    egui::{self, Color32, Context, Frame},
+    egui::{self, Color32, Context, Frame, Ui},
     emath::Align2,
-    epaint::{pos2, FontId, Pos2, Rect},
+    epaint::FontId,
 };
 use rand::prelude::*;
 use std::{
@@ -16,7 +16,7 @@ use std::{
 };
 use zerocopy::AsBytes;
 
-use patchjuggler::{Object, SCALE, SPACE_WIDTH};
+use patchjuggler::{render_objects, Object, SPACE_WIDTH};
 
 const RANDOM_MOTION: f64 = 5e-3;
 const SEPARATION: f64 = 5e-3;
@@ -245,42 +245,30 @@ pub struct SenderApp {
     shared: Arc<Shared>,
 }
 
+impl SenderApp {
+    fn render(&self, ui: &mut Ui) {
+        let (response, painter) = render_objects(&self.shared.objs.lock().unwrap(), ui);
+
+        painter.text(
+            response.rect.left_top(),
+            Align2::LEFT_TOP,
+            format!(
+                "Sent {} bytes",
+                self.shared.total_amt.load(Ordering::Relaxed)
+            ),
+            FontId::proportional(16.),
+            Color32::BLACK,
+        );
+    }
+}
+
 impl eframe::App for SenderApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint();
 
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
-                let (response, painter) =
-                    ui.allocate_painter(ui.available_size(), egui::Sense::click());
-
-                let to_screen = egui::emath::RectTransform::from_to(
-                    Rect::from_min_size(Pos2::ZERO, response.rect.size()),
-                    response.rect,
-                );
-
-                for obj in self.shared.objs.lock().unwrap().iter() {
-                    painter.circle(
-                        to_screen.transform_pos(pos2(
-                            obj.pos[0] as f32 * SCALE,
-                            obj.pos[1] as f32 * SCALE,
-                        )),
-                        3.,
-                        Color32::from_rgb(obj.color[0], obj.color[1], obj.color[2]),
-                        (1., Color32::BLACK),
-                    );
-                }
-
-                painter.text(
-                    response.rect.left_top(),
-                    Align2::LEFT_TOP,
-                    format!(
-                        "Sent {} bytes",
-                        self.shared.total_amt.load(Ordering::Relaxed)
-                    ),
-                    FontId::proportional(16.),
-                    Color32::BLACK,
-                );
+                self.render(ui);
             });
         });
     }
