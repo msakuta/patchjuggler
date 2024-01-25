@@ -16,7 +16,7 @@ use std::{
 };
 use zerocopy::AsBytes;
 
-use patchjuggler::{Object, SCALE};
+use patchjuggler::{Object, DELTA_TIME, SCALE, SPACE_WIDTH};
 
 const RANDOM_MOTION: f64 = 5e-3;
 const SEPARATION: f64 = 5e-3;
@@ -32,8 +32,6 @@ const MIN_SPEED: f64 = 0.25;
 const MAX_SPEED: f64 = 0.5;
 const SPEED_ADAPT: f64 = 1e-2;
 const DRAG: f64 = 0.;
-const DELTA_TIME: f64 = 1. / 20.;
-const SPACE_WIDTH: f64 = 10.;
 
 struct Shared {
     args: Args,
@@ -232,10 +230,7 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
                 obj.velo[1] -= vy / speed * SPEED_ADAPT;
             }
 
-            for axis in [0, 1] {
-                obj.pos[axis] =
-                    (obj.pos[axis] + DELTA_TIME * obj.velo[axis]).clamp(0., SPACE_WIDTH);
-            }
+            obj.time_step();
         }
 
         let mut amt = 0;

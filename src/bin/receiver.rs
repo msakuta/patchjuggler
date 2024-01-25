@@ -137,7 +137,8 @@ impl eframe::App for ReceiverApp {
                     response.rect,
                 );
 
-                for obj in self.shared.objs.lock().unwrap().iter() {
+                for obj in self.shared.objs.lock().unwrap().iter_mut() {
+                    obj.time_step();
                     painter.circle(
                         to_screen.transform_pos(pos2(
                             obj.pos[0] as f32 * SCALE,
