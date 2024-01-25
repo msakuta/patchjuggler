@@ -15,7 +15,7 @@ use std::{
 };
 use zerocopy::FromBytes;
 
-use patchjuggler::{Object, NUM_OBJS, SCALE};
+use patchjuggler::{Object, SCALE};
 
 struct Shared {
     args: Args,
@@ -46,7 +46,7 @@ struct Args {
 fn main() -> Result<(), String> {
     let shared = Arc::new(Shared {
         args: Args::parse(),
-        objs: Mutex::new((0..NUM_OBJS).map(|_| Object::default()).collect()),
+        objs: Mutex::new(vec![]),
         total_amt: AtomicUsize::new(0),
         exit_signal: AtomicBool::new(false),
     });
@@ -88,13 +88,23 @@ fn receiver_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         let mut buf = [0; size_of::<usize>() + size_of::<Object>()];
         let (amt1, _src) = socket.recv_from(&mut buf)?;
         let i = usize::read_from(&buf[..size_of::<usize>()]).unwrap();
+        if i == 0 {
+            let num_objects =
+                usize::read_from(&buf[size_of::<usize>()..size_of::<usize>() * 2]).unwrap();
+            shared
+                .objs
+                .lock()
+                .unwrap()
+                .resize(num_objects, Object::default());
+            continue;
+        }
         let buf = Object::ref_from(&buf[size_of::<usize>()..]).unwrap();
 
         shared.total_amt.fetch_add(amt1, Ordering::Relaxed);
 
         let mut objs = shared.objs.lock().unwrap();
-        if i < objs.len() {
-            objs[i] = *buf;
+        if i - 1 < objs.len() {
+            objs[i - 1] = *buf;
             // if i == 0 {
             //     println!(
             //         "[{t}]: Received {amt1} bytes from {_src:?}: {i} = {:?}!",

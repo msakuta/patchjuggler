@@ -65,15 +65,23 @@ struct Args {
         help = "The rate at which packets are sent in milliseconds"
     )]
     rate: u64,
+    #[clap(
+        short = 'n',
+        long,
+        default_value = "1000",
+        help = "The number of objects to synchronize"
+    )]
+    num_objects: usize,
 }
 
 fn main() -> Result<(), String> {
     let args = Args::parse();
     let mut rng = rand::thread_rng();
+    let num_objects = args.num_objects;
     let shared = Arc::new(Shared {
         args,
         objs: Mutex::new(
-            (0..NUM_OBJS)
+            (0..num_objects)
                 .map(|_| {
                     Object::new(
                         [rng.gen::<f64>() * 10., rng.gen::<f64>() * 10.],
@@ -130,10 +138,22 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         }
 
         let mut objs = shared.objs.lock().unwrap();
+        for obj in objs.iter_mut() {
+            obj.pos[0] += (rng.gen::<f64>() - 0.5) * MOTION;
+            obj.pos[1] += (rng.gen::<f64>() - 0.5) * MOTION;
+        }
+
         let mut amt = 0;
+
+        // First, send the number of objects to allocate
+        let mut buf = [0u8; size_of::<usize>() + size_of::<usize>()];
+        0usize.write_to(&mut buf[..size_of::<usize>()]);
+        objs.len().write_to(&mut buf[size_of::<usize>()..]);
+        amt += socket.send_to(&buf, &addr)?;
+
         for (i, obj) in objs.iter().enumerate() {
             let mut buf = [0u8; size_of::<usize>() + size_of::<Object>()];
-            i.write_to(&mut buf[..size_of::<usize>()]);
+            (i + 1).write_to(&mut buf[..size_of::<usize>()]);
             obj.write_to(&mut buf[size_of::<usize>()..]);
             amt += socket.send_to(&buf, &addr)?;
         }
@@ -144,24 +164,10 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         }
         shared.total_amt.fetch_add(amt, Ordering::Relaxed);
 
-        for obj in objs.iter_mut() {
-            obj.pos[0] += (rng.gen::<f64>() - 0.5) * MOTION;
-            obj.pos[1] += (rng.gen::<f64>() - 0.5) * MOTION;
-        }
         drop(objs);
 
-        // Redeclare `buf` as slice of the received data and send reverse data back to origin.
-        // let buf = &mut buf[..amt];
-        // buf.reverse();
-        // let (amt, addr) = socket.recv_from(&mut buf)?;
-
-        // println!(
-        //     "[{i}] Received response of {amt} bytes from {addr:?}! {:?}",
-        //     &buf[..amt]
-        // );
         t += 1;
-    } // the socket is closed here
-      // Ok(())
+    }
 }
 
 pub struct SenderApp {
