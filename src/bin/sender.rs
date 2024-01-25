@@ -72,6 +72,13 @@ struct Args {
         help = "The number of objects to synchronize"
     )]
     num_objects: usize,
+    #[clap(
+        short = 'b',
+        long,
+        default_value = "1000",
+        help = "The number of objects to send in one burst. Having a low value helps GUI to run smoothly but will have overhead sending patches"
+    )]
+    burst_objs: usize,
 }
 
 fn main() -> Result<(), String> {
@@ -127,6 +134,7 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
     std::thread::sleep(std::time::Duration::from_millis(1000));
     let socket = UdpSocket::bind((shared.args.src_host, shared.args.src_port))?;
     let mut t = 0;
+    let mut n = 0;
     let mut rng = rand::thread_rng();
     loop {
         let addr = (shared.args.dest_host, shared.args.dest_port);
@@ -151,11 +159,15 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         objs.len().write_to(&mut buf[size_of::<usize>()..]);
         amt += socket.send_to(&buf, &addr)?;
 
-        for (i, obj) in objs.iter().enumerate() {
+        for (i, obj) in objs.iter().enumerate().skip(n).take(shared.args.burst_objs) {
             let mut buf = [0u8; size_of::<usize>() + size_of::<Object>()];
             (i + 1).write_to(&mut buf[..size_of::<usize>()]);
             obj.write_to(&mut buf[size_of::<usize>()..]);
             amt += socket.send_to(&buf, &addr)?;
+        }
+        n += shared.args.burst_objs;
+        if objs.len() <= n {
+            n = 0;
         }
 
         // Don't print to terminal too often
