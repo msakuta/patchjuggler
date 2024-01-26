@@ -37,6 +37,7 @@ struct Shared {
     exit_signal: AtomicBool,
     sort_map: Mutex<SortMap>,
     first_result: Mutex<Vec<usize>>,
+    use_sort_map: AtomicBool,
 }
 
 #[derive(Parser, Clone, Debug)]
@@ -116,6 +117,7 @@ fn main() -> Result<(), String> {
         exit_signal: AtomicBool::new(false),
         sort_map: Mutex::new(sort_map),
         first_result: Mutex::new(vec![]),
+        use_sort_map: AtomicBool::new(true),
     });
 
     let shared_copy = shared.clone();
@@ -263,21 +265,23 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         // let hash_table = vec![HashEntry::default(); objs.len()];
         // let start_offsets = vec![usize::MAX; objs.len()];
         let mut scanner = Scanner::new(&mut rng);
-        sort_map.update(&mut objs, &mut scanner);
-
-        let mut first_result = shared.first_result.lock().unwrap();
-        *first_result = scanner.first_result;
-
-        // let objs2 = objs.clone();
-        // for (i, obj) in objs.iter_mut().enumerate() {
-        //     for (j, obj2) in objs2.iter().enumerate() {
-        //         if i == j {
-        //             continue;
-        //         }
-
-        //     }
-
-        // });
+        if shared.use_sort_map.load(Ordering::Relaxed) {
+            sort_map.update(&mut objs, &mut scanner);
+            let mut first_result = shared.first_result.lock().unwrap();
+            *first_result = scanner.first_result;
+        } else {
+            for i in 0..objs.len() {
+                scanner.start(i, &objs[i]);
+                for (j, obj2) in objs.iter().enumerate() {
+                    if i == j {
+                        continue;
+                    }
+                    scanner.next(j, obj2);
+                }
+                scanner.end(i, &mut objs[i]);
+            }
+            shared.first_result.lock().unwrap().clear();
+        }
 
         let mut amt = 0;
 
@@ -350,7 +354,7 @@ impl SenderApp {
 
         if self.show_grid {
             let objs = self.shared.objs.lock().unwrap();
-            self.shared.sort_map.lock().unwrap().render_grid(
+            SortMap::render_grid(
                 objs.iter().map(|o| [o.pos[0] as f32, o.pos[1] as f32]),
                 &response,
                 &painter,
@@ -372,6 +376,11 @@ impl SenderApp {
     fn ui_panel(&mut self, ui: &mut Ui) {
         ui.checkbox(&mut self.show_grid, "Show grid");
         ui.checkbox(&mut self.show_neighbors, "Show neighbors");
+        let mut use_sort_map = self.shared.use_sort_map.load(Ordering::Acquire);
+        ui.checkbox(&mut use_sort_map, "Use sort map");
+        self.shared
+            .use_sort_map
+            .store(use_sort_map, Ordering::Release);
     }
 }
 

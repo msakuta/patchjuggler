@@ -123,7 +123,6 @@ impl SortMap {
     }
 
     pub fn render_grid(
-        &mut self,
         objs: impl Iterator<Item = [f32; 2]>,
         response: &Response,
         painter: &Painter,
