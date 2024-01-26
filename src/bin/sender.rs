@@ -2,7 +2,7 @@ use clap::Parser;
 use eframe::{
     egui::{self, Color32, Context, Frame, Ui},
     emath::Align2,
-    epaint::FontId,
+    epaint::{pos2, FontId, Pos2, Rect},
 };
 use rand::prelude::*;
 use std::{
@@ -16,7 +16,7 @@ use std::{
 };
 use zerocopy::AsBytes;
 
-use patchjuggler::{render_objects, Object, SPACE_WIDTH};
+use patchjuggler::{render_objects, Object, SortMap, UpdateScanner, SCALE, SPACE_WIDTH};
 
 const RANDOM_MOTION: f64 = 5e-3;
 const SEPARATION: f64 = 5e-3;
@@ -35,6 +35,8 @@ struct Shared {
     objs: Mutex<Vec<Object>>,
     total_amt: AtomicUsize,
     exit_signal: AtomicBool,
+    sort_map: Mutex<SortMap>,
+    first_result: Mutex<Vec<usize>>,
 }
 
 #[derive(Parser, Clone, Debug)]
@@ -95,23 +97,25 @@ fn main() -> Result<(), String> {
     let args = Args::parse();
     let mut rng = rand::thread_rng();
     let num_objects = args.num_objects;
+    let objs = (0..num_objects)
+        .map(|_| {
+            Object::new(
+                [
+                    rng.gen::<f64>() * SPACE_WIDTH,
+                    rng.gen::<f64>() * SPACE_WIDTH,
+                ],
+                [rng.gen::<u8>(), rng.gen(), rng.gen()],
+            )
+        })
+        .collect();
+    let sort_map = SortMap::new(num_objects);
     let shared = Arc::new(Shared {
         args,
-        objs: Mutex::new(
-            (0..num_objects)
-                .map(|_| {
-                    Object::new(
-                        [
-                            rng.gen::<f64>() * SPACE_WIDTH,
-                            rng.gen::<f64>() * SPACE_WIDTH,
-                        ],
-                        [rng.gen::<u8>(), rng.gen(), rng.gen()],
-                    )
-                })
-                .collect(),
-        ),
+        objs: Mutex::new(objs),
         total_amt: AtomicUsize::new(0),
         exit_signal: AtomicBool::new(false),
+        sort_map: Mutex::new(sort_map),
+        first_result: Mutex::new(vec![]),
     });
 
     let shared_copy = shared.clone();
@@ -139,8 +143,103 @@ fn gui_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
     Ok(eframe::run_native(
         "sender GUI",
         native_options,
-        Box::new(|_cc| Box::new(SenderApp { shared })),
+        Box::new(|_cc| {
+            Box::new(SenderApp {
+                shared,
+                show_grid: true,
+            })
+        }),
     )?)
+}
+
+struct Scanner<'a> {
+    rng: &'a mut ThreadRng,
+    obj1: Option<Object>,
+    force: [f64; 2],
+    cohesion: [f64; 2],
+    cohesion_count: usize,
+    first_result: Vec<usize>,
+    i: Option<usize>,
+}
+
+impl<'a> Scanner<'a> {
+    fn new(rng: &'a mut ThreadRng) -> Self {
+        Self {
+            rng,
+            obj1: None,
+            force: [0.; 2],
+            cohesion: [0.; 2],
+            cohesion_count: 0,
+            first_result: vec![],
+            i: None,
+        }
+    }
+}
+
+impl<'a> UpdateScanner for Scanner<'a> {
+    fn start(&mut self, i: usize, obj1: &Object) {
+        self.obj1 = Some(*obj1);
+        self.force = [0f64; 2];
+        self.cohesion = [0f64; 2];
+        self.cohesion_count = 0;
+        self.i = Some(i);
+    }
+
+    fn next(&mut self, j: usize, obj2: &Object) {
+        let Some(obj1) = self.obj1 else {
+            return;
+        };
+        let dx = obj1.pos[0] - obj2.pos[0];
+        let dy = obj1.pos[1] - obj2.pos[1];
+        let dist2 = dx.powi(2) + dy.powi(2);
+        if dist2 == 0. {
+            return;
+        }
+        let dist = dist2.sqrt();
+        let predicted_pos = [
+            obj2.pos[0] + PREDICTION_TIME * obj2.velo[0]
+                - obj1.pos[0]
+                - PREDICTION_TIME * obj1.velo[0],
+            obj2.pos[1] + PREDICTION_TIME * obj2.velo[1]
+                - obj1.pos[1]
+                - PREDICTION_TIME * obj1.velo[1],
+        ];
+        let predicted_dist2 = predicted_pos[0].powi(2) + predicted_pos[1].powi(2);
+        if predicted_dist2 < SEPARATION_DIST.powi(2) {
+            let predicted_dist = predicted_dist2.sqrt();
+            self.force[0] +=
+                SEPARATION * dx / predicted_dist * (1. - predicted_dist / SEPARATION_DIST);
+            self.force[1] +=
+                SEPARATION * dy / predicted_dist * (1. - predicted_dist / SEPARATION_DIST);
+        }
+        if dist < ALIGNMENT_DIST {
+            self.force[0] += (obj2.velo[0] - obj1.velo[0]) * ALIGNMENT;
+            self.force[1] += (obj2.velo[1] - obj1.velo[1]) * ALIGNMENT;
+        }
+        if dist < COHESION_DIST {
+            self.cohesion[0] += COHESION * dx / dist;
+            self.cohesion[1] += COHESION * dy / dist;
+            self.cohesion_count += 1;
+        } else if dist < GROUP_SEPARATION_DIST {
+            self.force[0] += GROUP_SEPARATION * dx / dist * (1. - dist / GROUP_SEPARATION_DIST);
+            self.force[1] += GROUP_SEPARATION * dy / dist * (1. - dist / GROUP_SEPARATION_DIST);
+        }
+        if self.i == Some(0) {
+            self.first_result.push(j);
+        }
+    }
+
+    fn end(&mut self, _i: usize, obj: &mut Object) {
+        for axis in [0, 1] {
+            obj.velo[axis] += self.force[axis] + (self.rng.gen::<f64>() - 0.5) * RANDOM_MOTION
+                - obj.velo[axis] * DRAG;
+            if 0 < self.cohesion_count {
+                obj.velo[axis] += self.cohesion[axis] / self.cohesion_count as f64;
+            }
+        }
+
+        obj.time_step();
+    }
 }
 
 fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
@@ -159,61 +258,25 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         }
 
         let mut objs = shared.objs.lock().unwrap();
-        let objs2 = objs.clone();
-        for (i, obj) in objs.iter_mut().enumerate() {
-            let mut force = [0f64; 2];
-            let mut cohesion = [0f64; 2];
-            let mut cohesion_count = 0;
-            for (j, obj2) in objs2.iter().enumerate() {
-                if i == j {
-                    continue;
-                }
-                let dx = obj.pos[0] - obj2.pos[0];
-                let dy = obj.pos[1] - obj2.pos[1];
-                let dist2 = dx.powi(2) + dy.powi(2);
-                if dist2 == 0. {
-                    continue;
-                }
-                let dist = dist2.sqrt();
-                let predicted_pos = [
-                    obj2.pos[0] + PREDICTION_TIME * obj2.velo[0]
-                        - obj.pos[0]
-                        - PREDICTION_TIME * obj.velo[0],
-                    obj2.pos[1] + PREDICTION_TIME * obj2.velo[1]
-                        - obj.pos[1]
-                        - PREDICTION_TIME * obj.velo[1],
-                ];
-                let predicted_dist2 = predicted_pos[0].powi(2) + predicted_pos[1].powi(2);
-                if predicted_dist2 < SEPARATION_DIST.powi(2) {
-                    let predicted_dist = predicted_dist2.sqrt();
-                    force[0] +=
-                        SEPARATION * dx / predicted_dist * (1. - predicted_dist / SEPARATION_DIST);
-                    force[1] +=
-                        SEPARATION * dy / predicted_dist * (1. - predicted_dist / SEPARATION_DIST);
-                }
-                if dist < ALIGNMENT_DIST {
-                    force[0] += (obj2.velo[0] - obj.velo[0]) * ALIGNMENT;
-                    force[1] += (obj2.velo[1] - obj.velo[1]) * ALIGNMENT;
-                }
-                if dist < COHESION_DIST {
-                    cohesion[0] += COHESION * dx / dist;
-                    cohesion[1] += COHESION * dy / dist;
-                    cohesion_count += 1;
-                } else if dist < GROUP_SEPARATION_DIST {
-                    force[0] += GROUP_SEPARATION * dx / dist * (1. - dist / GROUP_SEPARATION_DIST);
-                    force[1] += GROUP_SEPARATION * dy / dist * (1. - dist / GROUP_SEPARATION_DIST);
-                }
-            }
-            for axis in [0, 1] {
-                obj.velo[axis] +=
-                    force[axis] + (rng.gen::<f64>() - 0.5) * RANDOM_MOTION - obj.velo[axis] * DRAG;
-                if 0 < cohesion_count {
-                    obj.velo[axis] += cohesion[axis] / cohesion_count as f64;
-                }
-            }
+        let mut sort_map = shared.sort_map.lock().unwrap();
+        // let hash_table = vec![HashEntry::default(); objs.len()];
+        // let start_offsets = vec![usize::MAX; objs.len()];
+        let mut scanner = Scanner::new(&mut rng);
+        sort_map.update(&mut objs, &mut scanner);
 
-            obj.time_step();
-        }
+        let mut first_result = shared.first_result.lock().unwrap();
+        *first_result = scanner.first_result;
+
+        // let objs2 = objs.clone();
+        // for (i, obj) in objs.iter_mut().enumerate() {
+        //     for (j, obj2) in objs2.iter().enumerate() {
+        //         if i == j {
+        //             continue;
+        //         }
+
+        //     }
+
+        // });
 
         let mut amt = 0;
 
@@ -248,11 +311,44 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
 
 pub struct SenderApp {
     shared: Arc<Shared>,
+    show_grid: bool,
 }
 
 impl SenderApp {
     fn render(&self, ui: &mut Ui) {
         let (response, painter) = render_objects(&self.shared.objs.lock().unwrap(), ui);
+
+        let to_screen = egui::emath::RectTransform::from_to(
+            Rect::from_min_size(Pos2::ZERO, response.rect.size()),
+            response.rect,
+        );
+
+        let objs = self.shared.objs.lock().unwrap();
+        if let Ok(first_result) = self.shared.first_result.lock() {
+            let pos0 = objs[0].pos;
+            for j in first_result.iter() {
+                let pos_j = objs[*j].pos;
+                painter.line_segment(
+                    [
+                        to_screen
+                            .transform_pos(pos2(pos0[0] as f32 * SCALE, pos0[1] as f32 * SCALE)),
+                        to_screen
+                            .transform_pos(pos2(pos_j[0] as f32 * SCALE, pos_j[1] as f32 * SCALE)),
+                    ],
+                    (1., Color32::from_rgb(0, 127, 255)),
+                );
+            }
+        }
+        drop(objs);
+
+        if self.show_grid {
+            let objs = self.shared.objs.lock().unwrap();
+            self.shared.sort_map.lock().unwrap().render_grid(
+                objs.iter().map(|o| [o.pos[0] as f32, o.pos[1] as f32]),
+                &response,
+                &painter,
+            );
+        }
 
         painter.text(
             response.rect.left_top(),

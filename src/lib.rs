@@ -1,8 +1,12 @@
 mod render;
+mod sort_map;
 
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes};
 
-pub use render::render_objects;
+pub use crate::{
+    render::render_objects,
+    sort_map::{HashEntry, SortMap, UpdateScanner},
+};
 
 pub const DELTA_TIME: f64 = 1. / 20.;
 pub const SPACE_WIDTH: f64 = 10.;
