@@ -147,6 +147,7 @@ fn gui_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
             Box::new(SenderApp {
                 shared,
                 show_grid: true,
+                show_neighbors: true,
             })
         }),
     )?)
@@ -312,6 +313,7 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
 pub struct SenderApp {
     shared: Arc<Shared>,
     show_grid: bool,
+    show_neighbors: bool,
 }
 
 impl SenderApp {
@@ -323,23 +325,28 @@ impl SenderApp {
             response.rect,
         );
 
-        let objs = self.shared.objs.lock().unwrap();
-        if let Ok(first_result) = self.shared.first_result.lock() {
-            let pos0 = objs[0].pos;
-            for j in first_result.iter() {
-                let pos_j = objs[*j].pos;
-                painter.line_segment(
-                    [
-                        to_screen
-                            .transform_pos(pos2(pos0[0] as f32 * SCALE, pos0[1] as f32 * SCALE)),
-                        to_screen
-                            .transform_pos(pos2(pos_j[0] as f32 * SCALE, pos_j[1] as f32 * SCALE)),
-                    ],
-                    (1., Color32::from_rgb(0, 127, 255)),
-                );
+        if self.show_neighbors {
+            let objs = self.shared.objs.lock().unwrap();
+            if let Ok(first_result) = self.shared.first_result.lock() {
+                let pos0 = objs[0].pos;
+                for j in first_result.iter() {
+                    let pos_j = objs[*j].pos;
+                    painter.line_segment(
+                        [
+                            to_screen.transform_pos(pos2(
+                                pos0[0] as f32 * SCALE,
+                                pos0[1] as f32 * SCALE,
+                            )),
+                            to_screen.transform_pos(pos2(
+                                pos_j[0] as f32 * SCALE,
+                                pos_j[1] as f32 * SCALE,
+                            )),
+                        ],
+                        (1., Color32::from_rgb(0, 127, 255)),
+                    );
+                }
             }
         }
-        drop(objs);
 
         if self.show_grid {
             let objs = self.shared.objs.lock().unwrap();
@@ -361,11 +368,22 @@ impl SenderApp {
             Color32::BLACK,
         );
     }
+
+    fn ui_panel(&mut self, ui: &mut Ui) {
+        ui.checkbox(&mut self.show_grid, "Show grid");
+        ui.checkbox(&mut self.show_neighbors, "Show neighbors");
+    }
 }
 
 impl eframe::App for SenderApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint();
+
+        egui::SidePanel::right("side_panel")
+            .min_width(200.)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.ui_panel(ui))
+            });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
