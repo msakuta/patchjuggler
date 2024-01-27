@@ -150,6 +150,7 @@ fn gui_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
                 shared,
                 show_grid: true,
                 show_neighbors: true,
+                show_distances: true,
             })
         }),
     )?)
@@ -318,6 +319,7 @@ pub struct SenderApp {
     shared: Arc<Shared>,
     show_grid: bool,
     show_neighbors: bool,
+    show_distances: bool,
 }
 
 impl SenderApp {
@@ -352,6 +354,21 @@ impl SenderApp {
             }
         }
 
+        if self.show_distances {
+            let pos = self.shared.objs.lock().unwrap()[0].pos;
+            for (dist, color) in [
+                (SEPARATION_DIST, Color32::from_rgb(255, 0, 255)),
+                (ALIGNMENT_DIST, Color32::from_rgb(0, 127, 127)),
+                (GROUP_SEPARATION_DIST, Color32::from_rgb(127, 127, 0)),
+            ] {
+                painter.circle_stroke(
+                    to_screen.transform_pos(pos2(pos[0] as f32 * SCALE, pos[1] as f32 * SCALE)),
+                    dist as f32 * SCALE,
+                    (1., color),
+                );
+            }
+        }
+
         if self.show_grid {
             let objs = self.shared.objs.lock().unwrap();
             SortMap::render_grid(
@@ -376,6 +393,7 @@ impl SenderApp {
     fn ui_panel(&mut self, ui: &mut Ui) {
         ui.checkbox(&mut self.show_grid, "Show grid");
         ui.checkbox(&mut self.show_neighbors, "Show neighbors");
+        ui.checkbox(&mut self.show_distances, "Show distances");
         let mut use_sort_map = self.shared.use_sort_map.load(Ordering::Acquire);
         ui.checkbox(&mut use_sort_map, "Use sort map");
         self.shared
