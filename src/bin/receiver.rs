@@ -133,7 +133,7 @@ impl eframe::App for ReceiverApp {
                 for obj in objs.iter_mut() {
                     obj.time_step();
                 }
-                let (response, painter) = render_objects(&objs, ui);
+                let (response, painter) = render_objects(&objs, None, ui);
                 drop(objs); // Release the mutex ASAP
 
                 painter.text(

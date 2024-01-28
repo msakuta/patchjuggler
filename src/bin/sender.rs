@@ -28,6 +28,7 @@ const COHESION: f64 = 1e-4;
 const COHESION_DIST: f64 = 0.7;
 const GROUP_SEPARATION: f64 = 2e-3;
 const GROUP_SEPARATION_DIST: f64 = 1.5;
+const SELECT_RADIUS: f32 = 0.5;
 const DRAG: f64 = 0.;
 
 struct Shared {
@@ -36,7 +37,8 @@ struct Shared {
     total_amt: AtomicUsize,
     exit_signal: AtomicBool,
     sort_map: Mutex<SortMap>,
-    first_result: Mutex<Vec<usize>>,
+    selected_obj: Mutex<Option<usize>>,
+    find_result: Mutex<Vec<usize>>,
     use_sort_map: AtomicBool,
 }
 
@@ -116,7 +118,8 @@ fn main() -> Result<(), String> {
         total_amt: AtomicUsize::new(0),
         exit_signal: AtomicBool::new(false),
         sort_map: Mutex::new(sort_map),
-        first_result: Mutex::new(vec![]),
+        selected_obj: Mutex::new(None),
+        find_result: Mutex::new(vec![]),
         use_sort_map: AtomicBool::new(true),
     });
 
@@ -162,19 +165,21 @@ struct Scanner<'a> {
     force: [f64; 2],
     cohesion: [f64; 2],
     cohesion_count: usize,
-    first_result: Vec<usize>,
+    find_index: Option<usize>,
+    find_result: Vec<usize>,
     i: Option<usize>,
 }
 
 impl<'a> Scanner<'a> {
-    fn new(rng: &'a mut ThreadRng) -> Self {
+    fn new(find_index: Option<usize>, rng: &'a mut ThreadRng) -> Self {
         Self {
             rng,
             obj1: None,
             force: [0.; 2],
             cohesion: [0.; 2],
             cohesion_count: 0,
-            first_result: vec![],
+            find_index,
+            find_result: vec![],
             i: None,
         }
     }
@@ -228,8 +233,8 @@ impl<'a> UpdateScanner for Scanner<'a> {
             self.force[0] += GROUP_SEPARATION * dx / dist * (1. - dist / GROUP_SEPARATION_DIST);
             self.force[1] += GROUP_SEPARATION * dy / dist * (1. - dist / GROUP_SEPARATION_DIST);
         }
-        if self.i == Some(0) {
-            self.first_result.push(j);
+        if self.i.is_some() && self.i == self.find_index {
+            self.find_result.push(j);
         }
     }
 
@@ -265,11 +270,11 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         let mut sort_map = shared.sort_map.lock().unwrap();
         // let hash_table = vec![HashEntry::default(); objs.len()];
         // let start_offsets = vec![usize::MAX; objs.len()];
-        let mut scanner = Scanner::new(&mut rng);
+        let mut scanner = Scanner::new(*shared.selected_obj.lock().unwrap(), &mut rng);
         if shared.use_sort_map.load(Ordering::Relaxed) {
             sort_map.update(&mut objs, &mut scanner);
-            let mut first_result = shared.first_result.lock().unwrap();
-            *first_result = scanner.first_result;
+            let mut find_result = shared.find_result.lock().unwrap();
+            *find_result = scanner.find_result;
         } else {
             for i in 0..objs.len() {
                 scanner.start(i, &objs[i]);
@@ -281,7 +286,7 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
                 }
                 scanner.end(i, &mut objs[i]);
             }
-            shared.first_result.lock().unwrap().clear();
+            shared.find_result.lock().unwrap().clear();
         }
 
         let mut amt = 0;
@@ -323,49 +328,86 @@ pub struct SenderApp {
 }
 
 impl SenderApp {
-    fn render(&self, ui: &mut Ui) {
-        let (response, painter) = render_objects(&self.shared.objs.lock().unwrap(), ui);
+    fn render(&mut self, ui: &mut Ui) {
+        let (response, painter) = render_objects(
+            &self.shared.objs.lock().unwrap(),
+            *self.shared.selected_obj.lock().unwrap(),
+            ui,
+        );
 
         let to_screen = egui::emath::RectTransform::from_to(
             Rect::from_min_size(Pos2::ZERO, response.rect.size()),
             response.rect,
         );
 
+        let from_screen = egui::emath::RectTransform::from_to(
+            response.rect,
+            Rect::from_min_size(Pos2::ZERO, response.rect.size()),
+        );
+
+        if response.clicked() {
+            if let Some(scr_pos) = response.interact_pointer_pos() {
+                let pos = from_screen.transform_pos(scr_pos) / SCALE;
+                let closest_obj = self.shared.objs.lock().unwrap().iter().enumerate().fold(
+                    None,
+                    |acc: Option<(f32, usize)>, cur| {
+                        let dist = (pos - pos2(cur.1.pos[0] as f32, cur.1.pos[1] as f32)).length();
+                        if let Some(acc) = acc {
+                            if dist < SELECT_RADIUS && dist < acc.0 {
+                                Some((dist, cur.0))
+                            } else {
+                                Some(acc)
+                            }
+                        } else if dist < SELECT_RADIUS {
+                            Some((dist, cur.0))
+                        } else {
+                            None
+                        }
+                    },
+                );
+                *self.shared.selected_obj.lock().unwrap() = closest_obj.map(|o| o.1);
+            }
+        }
+
         if self.show_neighbors {
-            let objs = self.shared.objs.lock().unwrap();
-            if let Ok(first_result) = self.shared.first_result.lock() {
-                let pos0 = objs[0].pos;
-                for j in first_result.iter() {
-                    let pos_j = objs[*j].pos;
-                    painter.line_segment(
-                        [
-                            to_screen.transform_pos(pos2(
-                                pos0[0] as f32 * SCALE,
-                                pos0[1] as f32 * SCALE,
-                            )),
-                            to_screen.transform_pos(pos2(
-                                pos_j[0] as f32 * SCALE,
-                                pos_j[1] as f32 * SCALE,
-                            )),
-                        ],
-                        (1., Color32::from_rgb(0, 127, 255)),
-                    );
+            if let Some(selected_obj) = *self.shared.selected_obj.lock().unwrap() {
+                let objs = self.shared.objs.lock().unwrap();
+                if let Ok(first_result) = self.shared.find_result.lock() {
+                    let pos0 = objs[selected_obj].pos;
+                    for j in first_result.iter() {
+                        let pos_j = objs[*j].pos;
+                        painter.line_segment(
+                            [
+                                to_screen.transform_pos(pos2(
+                                    pos0[0] as f32 * SCALE,
+                                    pos0[1] as f32 * SCALE,
+                                )),
+                                to_screen.transform_pos(pos2(
+                                    pos_j[0] as f32 * SCALE,
+                                    pos_j[1] as f32 * SCALE,
+                                )),
+                            ],
+                            (1., Color32::from_rgb(0, 127, 255)),
+                        );
+                    }
                 }
             }
         }
 
         if self.show_distances {
-            let pos = self.shared.objs.lock().unwrap()[0].pos;
-            for (dist, color) in [
-                (SEPARATION_DIST, Color32::from_rgb(255, 0, 255)),
-                (ALIGNMENT_DIST, Color32::from_rgb(0, 127, 127)),
-                (GROUP_SEPARATION_DIST, Color32::from_rgb(127, 127, 0)),
-            ] {
-                painter.circle_stroke(
-                    to_screen.transform_pos(pos2(pos[0] as f32 * SCALE, pos[1] as f32 * SCALE)),
-                    dist as f32 * SCALE,
-                    (1., color),
-                );
+            if let Some(&selected_obj) = self.shared.selected_obj.lock().unwrap().as_ref() {
+                let pos = self.shared.objs.lock().unwrap()[selected_obj].pos;
+                for (dist, color) in [
+                    (SEPARATION_DIST, Color32::from_rgb(255, 0, 255)),
+                    (ALIGNMENT_DIST, Color32::from_rgb(0, 127, 127)),
+                    (GROUP_SEPARATION_DIST, Color32::from_rgb(127, 127, 0)),
+                ] {
+                    painter.circle_stroke(
+                        to_screen.transform_pos(pos2(pos[0] as f32 * SCALE, pos[1] as f32 * SCALE)),
+                        dist as f32 * SCALE,
+                        (1., color),
+                    );
+                }
             }
         }
 

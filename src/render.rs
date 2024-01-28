@@ -5,7 +5,11 @@ use eframe::{
 
 use crate::{Object, SCALE};
 
-pub fn render_objects(objs: &[Object], ui: &mut Ui) -> (Response, Painter) {
+pub fn render_objects(
+    objs: &[Object],
+    selected: Option<usize>,
+    ui: &mut Ui,
+) -> (Response, Painter) {
     let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click());
 
     let rotate = |pos: &Pos2, angle: f32| {
@@ -30,8 +34,12 @@ pub fn render_objects(objs: &[Object], ui: &mut Ui) -> (Response, Painter) {
         )
     };
 
-    for obj in objs.iter() {
-        let color = Color32::from_rgb(obj.color[0], obj.color[1], obj.color[2]);
+    for (i, obj) in objs.iter().enumerate() {
+        let color = if Some(i) == selected {
+            Color32::WHITE
+        } else {
+            Color32::from_rgb(obj.color[0], obj.color[1], obj.color[2])
+        };
         // painter.circle(
         //     to_screen.transform_pos(pos2(obj.pos[0] as f32 * SCALE, obj.pos[1] as f32 * SCALE)),
         //     3.,
