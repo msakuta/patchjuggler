@@ -57,9 +57,10 @@ impl Object {
 
 /// A scanner to update the behavior of objects as boids.
 /// It requires other objects' information, so it is a O(N^2) operation naively, which
-/// turns into O(N*M), where M is the averate number of other objects in the SortMap.
+/// turns into O(N*M), where M is the average number of other objects in the SortMap.
 pub struct BoidScanner<'a> {
     rng: Option<&'a mut ThreadRng>,
+    randomness: f64,
     obj1: Option<Object>,
     force: [f64; 2],
     cohesion: [f64; 2],
@@ -67,9 +68,10 @@ pub struct BoidScanner<'a> {
 }
 
 impl<'a> BoidScanner<'a> {
-    pub fn new(rng: Option<&'a mut ThreadRng>) -> Self {
+    pub fn new(rng: Option<&'a mut ThreadRng>, randomness: f64) -> Self {
         Self {
             rng,
+            randomness,
             obj1: None,
             force: [0.; 2],
             cohesion: [0.; 2],
@@ -143,7 +145,7 @@ impl<'a> UpdateScanner for BoidScanner<'a> {
         for axis in [0, 1] {
             obj.velo[axis] += self.force[axis] - obj.velo[axis] * DRAG;
             if let Some(rng) = &mut self.rng {
-                obj.velo[axis] += (rng.gen::<f64>() - 0.5) * RANDOM_MOTION;
+                obj.velo[axis] += (rng.gen::<f64>() - 0.5) * self.randomness;
             }
             if 0 < self.cohesion_count {
                 obj.velo[axis] += self.cohesion[axis] / self.cohesion_count as f64;

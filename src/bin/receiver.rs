@@ -17,7 +17,10 @@ use std::{
 use zerocopy::FromBytes;
 
 use patchjuggler::{
-    object::{BoidScanner, FindScanner, ALIGNMENT_DIST, GROUP_SEPARATION_DIST, SEPARATION_DIST},
+    object::{
+        BoidScanner, FindScanner, ALIGNMENT_DIST, GROUP_SEPARATION_DIST, RANDOM_MOTION,
+        SEPARATION_DIST,
+    },
     render_objects, Object, SortMap, UpdateScanner, SCALE,
 };
 
@@ -151,12 +154,8 @@ pub struct ReceiverApp {
 impl ReceiverApp {
     fn update_objs(&mut self) {
         let mut objs = self.shared.objs.lock().unwrap();
-        // for obj in objs.iter_mut() {
-        //     obj.time_step();
-        // }
         let mut sort_map = self.shared.sort_map.lock().unwrap();
-        let mut scanner = BoidScanner::new(None);
-        //*self.shared.selected_obj.lock().unwrap()
+        let mut scanner = BoidScanner::new(None, RANDOM_MOTION);
         if self.shared.use_sort_map.load(Ordering::Relaxed) {
             let mut find_scanner = FindScanner::new(*self.shared.selected_obj.lock().unwrap());
             sort_map.update(&objs);
@@ -176,7 +175,6 @@ impl ReceiverApp {
                 scanner.end(i, &mut objs[i]);
             }
         }
-        // self.shared.find_result.lock().unwrap().clear();
     }
 
     fn render(&mut self, ui: &mut Ui) {

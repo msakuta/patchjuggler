@@ -17,7 +17,7 @@ use std::{
 use zerocopy::AsBytes;
 
 use patchjuggler::{
-    object::{BoidScanner, ALIGNMENT_DIST, GROUP_SEPARATION_DIST, SEPARATION_DIST},
+    object::{BoidScanner, ALIGNMENT_DIST, GROUP_SEPARATION_DIST, RANDOM_MOTION, SEPARATION_DIST},
     render_objects, Object, SortMap, UpdateScanner, SCALE, SPACE_WIDTH,
 };
 
@@ -32,6 +32,7 @@ struct Shared {
     selected_obj: Mutex<Option<usize>>,
     find_result: Mutex<Vec<usize>>,
     use_sort_map: AtomicBool,
+    randomness: Mutex<f64>,
 }
 
 #[derive(Parser, Clone, Debug)]
@@ -113,6 +114,7 @@ fn main() -> Result<(), String> {
         selected_obj: Mutex::new(None),
         find_result: Mutex::new(vec![]),
         use_sort_map: AtomicBool::new(true),
+        randomness: Mutex::new(RANDOM_MOTION),
     });
 
     let shared_copy = shared.clone();
@@ -201,7 +203,7 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         let mut sort_map = shared.sort_map.lock().unwrap();
         // let hash_table = vec![HashEntry::default(); objs.len()];
         // let start_offsets = vec![usize::MAX; objs.len()];
-        let mut scanner = BoidScanner::new(Some(&mut rng));
+        let mut scanner = BoidScanner::new(Some(&mut rng), *shared.randomness.lock().unwrap());
         if shared.use_sort_map.load(Ordering::Relaxed) {
             let mut find_scanner = FindScanner::new(*shared.selected_obj.lock().unwrap());
             sort_map.update(&objs);
@@ -375,6 +377,10 @@ impl SenderApp {
         self.shared
             .use_sort_map
             .store(use_sort_map, Ordering::Release);
+        ui.label("Randomness:");
+        let mut randomness = self.shared.randomness.lock().unwrap();
+        ui.add(egui::widgets::Slider::new(&mut *randomness, (0.)..=0.1));
+        drop(randomness);
     }
 }
 

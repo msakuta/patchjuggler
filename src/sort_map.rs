@@ -41,15 +41,19 @@ impl SortMap {
 }
 
 /// A trait to abstract processing the objects combinations.
+/// It is used to abstract the logic in [`SortMap`].
 ///
 /// Conceptually, it is a loop like this:
 ///
 /// ```txt
-/// start()
-/// for obj in objs:
-///     next()
-/// end()
+/// for obj1 in objs:
+///     start(obj1)
+///     for obj2 in objs:
+///         next(obj2)
+///     end(obj1)
 /// ```
+///
+/// But SortMap can optimize the process by enumerating only neighbors.
 pub trait UpdateScanner {
     fn start(&mut self, i: usize, obj1: &Object);
     fn next(&mut self, j: usize, obj2: &Object);
