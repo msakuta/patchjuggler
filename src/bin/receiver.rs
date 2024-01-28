@@ -179,7 +179,8 @@ impl ReceiverApp {
 
     fn render(&mut self, ui: &mut Ui) {
         let objs = self.shared.objs.lock().unwrap();
-        let (response, painter) = render_objects(&objs, None, ui);
+        let (response, painter) =
+            render_objects(&objs, *self.shared.selected_obj.lock().unwrap(), ui);
         drop(objs); // Release the mutex ASAP
 
         let to_screen = egui::emath::RectTransform::from_to(
