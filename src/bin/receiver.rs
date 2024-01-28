@@ -2,7 +2,7 @@ use clap::Parser;
 use eframe::{
     egui::{self, Color32, Context, Frame, Ui},
     emath::Align2,
-    epaint::FontId,
+    epaint::{pos2, FontId, Pos2, Rect},
 };
 
 use std::{
@@ -17,9 +17,11 @@ use std::{
 use zerocopy::FromBytes;
 
 use patchjuggler::{
-    object::{BoidScanner, FindScanner},
-    render_objects, Object, SortMap, UpdateScanner,
+    object::{BoidScanner, FindScanner, ALIGNMENT_DIST, GROUP_SEPARATION_DIST, SEPARATION_DIST},
+    render_objects, Object, SortMap, UpdateScanner, SCALE,
 };
+
+pub const SELECT_RADIUS: f32 = 0.5;
 
 struct Shared {
     args: Args,
@@ -86,7 +88,14 @@ fn gui_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
     Ok(eframe::run_native(
         "receiver GUI",
         native_options,
-        Box::new(|_cc| Box::new(ReceiverApp { shared })),
+        Box::new(|_cc| {
+            Box::new(ReceiverApp {
+                shared,
+                show_grid: true,
+                show_neighbors: true,
+                show_distances: true,
+            })
+        }),
     )?)
 }
 
@@ -134,6 +143,9 @@ fn receiver_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
 
 pub struct ReceiverApp {
     shared: Arc<Shared>,
+    show_grid: bool,
+    show_neighbors: bool,
+    show_distances: bool,
 }
 
 impl ReceiverApp {
@@ -167,10 +179,112 @@ impl ReceiverApp {
         // self.shared.find_result.lock().unwrap().clear();
     }
 
+    fn render(&mut self, ui: &mut Ui) {
+        let objs = self.shared.objs.lock().unwrap();
+        let (response, painter) = render_objects(&objs, None, ui);
+        drop(objs); // Release the mutex ASAP
+
+        let to_screen = egui::emath::RectTransform::from_to(
+            Rect::from_min_size(Pos2::ZERO, response.rect.size()),
+            response.rect,
+        );
+
+        let from_screen = egui::emath::RectTransform::from_to(
+            response.rect,
+            Rect::from_min_size(Pos2::ZERO, response.rect.size()),
+        );
+
+        if response.clicked() {
+            if let Some(scr_pos) = response.interact_pointer_pos() {
+                let pos = from_screen.transform_pos(scr_pos) / SCALE;
+                let closest_obj = self.shared.objs.lock().unwrap().iter().enumerate().fold(
+                    None,
+                    |acc: Option<(f32, usize)>, cur| {
+                        let dist = (pos - pos2(cur.1.pos[0] as f32, cur.1.pos[1] as f32)).length();
+                        if let Some(acc) = acc {
+                            if dist < SELECT_RADIUS && dist < acc.0 {
+                                Some((dist, cur.0))
+                            } else {
+                                Some(acc)
+                            }
+                        } else if dist < SELECT_RADIUS {
+                            Some((dist, cur.0))
+                        } else {
+                            None
+                        }
+                    },
+                );
+                *self.shared.selected_obj.lock().unwrap() = closest_obj.map(|o| o.1);
+            }
+        }
+
+        if self.show_neighbors {
+            if let Some(selected_obj) = *self.shared.selected_obj.lock().unwrap() {
+                let objs = self.shared.objs.lock().unwrap();
+                if let Ok(first_result) = self.shared.find_result.lock() {
+                    let pos0 = objs[selected_obj].pos;
+                    for j in first_result.iter() {
+                        let pos_j = objs[*j].pos;
+                        painter.line_segment(
+                            [
+                                to_screen.transform_pos(pos2(
+                                    pos0[0] as f32 * SCALE,
+                                    pos0[1] as f32 * SCALE,
+                                )),
+                                to_screen.transform_pos(pos2(
+                                    pos_j[0] as f32 * SCALE,
+                                    pos_j[1] as f32 * SCALE,
+                                )),
+                            ],
+                            (1., Color32::from_rgb(0, 127, 255)),
+                        );
+                    }
+                }
+            }
+        }
+
+        if self.show_distances {
+            if let Some(&selected_obj) = self.shared.selected_obj.lock().unwrap().as_ref() {
+                let pos = self.shared.objs.lock().unwrap()[selected_obj].pos;
+                for (dist, color) in [
+                    (SEPARATION_DIST, Color32::from_rgb(255, 0, 255)),
+                    (ALIGNMENT_DIST, Color32::from_rgb(0, 127, 127)),
+                    (GROUP_SEPARATION_DIST, Color32::from_rgb(127, 127, 0)),
+                ] {
+                    painter.circle_stroke(
+                        to_screen.transform_pos(pos2(pos[0] as f32 * SCALE, pos[1] as f32 * SCALE)),
+                        dist as f32 * SCALE,
+                        (1., color),
+                    );
+                }
+            }
+        }
+
+        if self.show_grid {
+            let objs = self.shared.objs.lock().unwrap();
+            SortMap::render_grid(
+                objs.iter().map(|o| [o.pos[0] as f32, o.pos[1] as f32]),
+                &response,
+                &painter,
+            );
+        }
+
+        painter.text(
+            response.rect.left_top(),
+            Align2::LEFT_TOP,
+            format!(
+                "Received {} bytes",
+                self.shared.total_amt.load(Ordering::Relaxed)
+            ),
+            FontId::proportional(16.),
+            Color32::BLACK,
+        );
+    }
+
     fn ui_panel(&mut self, ui: &mut Ui) {
-        // ui.checkbox(&mut self.show_grid, "Show grid");
-        // ui.checkbox(&mut self.show_neighbors, "Show neighbors");
-        // ui.checkbox(&mut self.show_distances, "Show distances");
+        ui.checkbox(&mut self.show_grid, "Show grid");
+        ui.checkbox(&mut self.show_neighbors, "Show neighbors");
+        ui.checkbox(&mut self.show_distances, "Show distances");
         let mut use_sort_map = self.shared.use_sort_map.load(Ordering::Acquire);
         ui.checkbox(&mut use_sort_map, "Use sort map");
         self.shared
@@ -193,20 +307,7 @@ impl eframe::App for ReceiverApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
-                let objs = self.shared.objs.lock().unwrap();
-                let (response, painter) = render_objects(&objs, None, ui);
-                drop(objs); // Release the mutex ASAP
-
-                painter.text(
-                    response.rect.left_top(),
-                    Align2::LEFT_TOP,
-                    format!(
-                        "Received {} bytes",
-                        self.shared.total_amt.load(Ordering::Relaxed)
-                    ),
-                    FontId::proportional(16.),
-                    Color32::BLACK,
-                );
+                self.render(ui);
             });
         });
     }
