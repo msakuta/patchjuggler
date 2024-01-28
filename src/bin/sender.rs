@@ -16,20 +16,12 @@ use std::{
 };
 use zerocopy::AsBytes;
 
-use patchjuggler::{render_objects, Object, SortMap, UpdateScanner, SCALE, SPACE_WIDTH};
+use patchjuggler::{
+    object::{BoidScanner, ALIGNMENT_DIST, GROUP_SEPARATION_DIST, SEPARATION_DIST},
+    render_objects, Object, SortMap, UpdateScanner, SCALE, SPACE_WIDTH,
+};
 
-const RANDOM_MOTION: f64 = 5e-3;
-const SEPARATION: f64 = 5e-3;
-const SEPARATION_DIST: f64 = 0.2;
-const PREDICTION_TIME: f64 = 0.;
-const ALIGNMENT: f64 = 1e-2;
-const ALIGNMENT_DIST: f64 = 0.7;
-const COHESION: f64 = 1e-4;
-const COHESION_DIST: f64 = 0.7;
-const GROUP_SEPARATION: f64 = 2e-3;
-const GROUP_SEPARATION_DIST: f64 = 1.5;
-const SELECT_RADIUS: f32 = 0.5;
-const DRAG: f64 = 0.;
+pub const SELECT_RADIUS: f32 = 0.5;
 
 struct Shared {
     args: Args,
@@ -159,25 +151,16 @@ fn gui_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
     )?)
 }
 
-struct Scanner<'a> {
-    rng: &'a mut ThreadRng,
-    obj1: Option<Object>,
-    force: [f64; 2],
-    cohesion: [f64; 2],
-    cohesion_count: usize,
+/// A local scanner that finds neighboring objects info
+struct FindScanner {
     find_index: Option<usize>,
     find_result: Vec<usize>,
     i: Option<usize>,
 }
 
-impl<'a> Scanner<'a> {
-    fn new(find_index: Option<usize>, rng: &'a mut ThreadRng) -> Self {
+impl FindScanner {
+    fn new(find_index: Option<usize>) -> Self {
         Self {
-            rng,
-            obj1: None,
-            force: [0.; 2],
-            cohesion: [0.; 2],
-            cohesion_count: 0,
             find_index,
             find_result: vec![],
             i: None,
@@ -185,70 +168,18 @@ impl<'a> Scanner<'a> {
     }
 }
 
-impl<'a> UpdateScanner for Scanner<'a> {
-    fn start(&mut self, i: usize, obj1: &Object) {
-        self.obj1 = Some(*obj1);
-        self.force = [0f64; 2];
-        self.cohesion = [0f64; 2];
-        self.cohesion_count = 0;
+impl UpdateScanner for FindScanner {
+    fn start(&mut self, i: usize, _obj1: &Object) {
         self.i = Some(i);
     }
 
-    fn next(&mut self, j: usize, obj2: &Object) {
-        let Some(obj1) = self.obj1 else {
-            return;
-        };
-        let dx = obj1.pos[0] - obj2.pos[0];
-        let dy = obj1.pos[1] - obj2.pos[1];
-        let dist2 = dx.powi(2) + dy.powi(2);
-        if dist2 == 0. {
-            return;
-        }
-        let dist = dist2.sqrt();
-        let predicted_pos = [
-            obj2.pos[0] + PREDICTION_TIME * obj2.velo[0]
-                - obj1.pos[0]
-                - PREDICTION_TIME * obj1.velo[0],
-            obj2.pos[1] + PREDICTION_TIME * obj2.velo[1]
-                - obj1.pos[1]
-                - PREDICTION_TIME * obj1.velo[1],
-        ];
-        let predicted_dist2 = predicted_pos[0].powi(2) + predicted_pos[1].powi(2);
-        if predicted_dist2 < SEPARATION_DIST.powi(2) {
-            let predicted_dist = predicted_dist2.sqrt();
-            self.force[0] +=
-                SEPARATION * dx / predicted_dist * (1. - predicted_dist / SEPARATION_DIST);
-            self.force[1] +=
-                SEPARATION * dy / predicted_dist * (1. - predicted_dist / SEPARATION_DIST);
-        }
-        if dist < ALIGNMENT_DIST {
-            self.force[0] += (obj2.velo[0] - obj1.velo[0]) * ALIGNMENT;
-            self.force[1] += (obj2.velo[1] - obj1.velo[1]) * ALIGNMENT;
-        }
-        if dist < COHESION_DIST {
-            self.cohesion[0] += COHESION * dx / dist;
-            self.cohesion[1] += COHESION * dy / dist;
-            self.cohesion_count += 1;
-        } else if dist < GROUP_SEPARATION_DIST {
-            self.force[0] += GROUP_SEPARATION * dx / dist * (1. - dist / GROUP_SEPARATION_DIST);
-            self.force[1] += GROUP_SEPARATION * dy / dist * (1. - dist / GROUP_SEPARATION_DIST);
-        }
+    fn next(&mut self, j: usize, _obj2: &Object) {
         if self.i.is_some() && self.i == self.find_index {
             self.find_result.push(j);
         }
     }
 
-    fn end(&mut self, _i: usize, obj: &mut Object) {
-        for axis in [0, 1] {
-            obj.velo[axis] += self.force[axis] + (self.rng.gen::<f64>() - 0.5) * RANDOM_MOTION
-                - obj.velo[axis] * DRAG;
-            if 0 < self.cohesion_count {
-                obj.velo[axis] += self.cohesion[axis] / self.cohesion_count as f64;
-            }
-        }
-
-        obj.time_step();
-    }
+    fn end(&mut self, _i: usize, _obj: &mut Object) {}
 }
 
 fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
@@ -270,11 +201,14 @@ fn sender_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
         let mut sort_map = shared.sort_map.lock().unwrap();
         // let hash_table = vec![HashEntry::default(); objs.len()];
         // let start_offsets = vec![usize::MAX; objs.len()];
-        let mut scanner = Scanner::new(*shared.selected_obj.lock().unwrap(), &mut rng);
+        let mut scanner = BoidScanner::new(Some(&mut rng));
         if shared.use_sort_map.load(Ordering::Relaxed) {
-            sort_map.update(&mut objs, &mut scanner);
+            let mut find_scanner = FindScanner::new(*shared.selected_obj.lock().unwrap());
+            sort_map.update(&objs);
+            sort_map.scan(&mut objs, &mut scanner);
+            sort_map.scan(&mut objs, &mut find_scanner);
             let mut find_result = shared.find_result.lock().unwrap();
-            *find_result = scanner.find_result;
+            *find_result = find_scanner.find_result;
         } else {
             for i in 0..objs.len() {
                 scanner.start(i, &objs[i]);

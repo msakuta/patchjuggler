@@ -33,6 +33,11 @@ impl SortMap {
             start_offsets: vec![usize::MAX; num_objs],
         }
     }
+
+    pub fn resize(&mut self, len: usize) {
+        self.hash_table.resize(len, HashEntry::default());
+        self.start_offsets.resize(len, usize::MAX);
+    }
 }
 
 /// A trait to abstract processing the objects combinations.
@@ -52,11 +57,12 @@ pub trait UpdateScanner {
 }
 
 impl SortMap {
-    pub fn update(&mut self, objs: &mut [Object], update_scanner: &mut impl UpdateScanner) {
+    fn hash(grid_pos: (i32, i32), len: usize) -> usize {
+        (grid_pos.0 + grid_pos.1 * 32121).rem_euclid(len as i32) as usize
+    }
+
+    pub fn update(&mut self, objs: &[Object]) {
         let len = objs.len();
-        let hasher = |grid_pos: (i32, i32)| -> usize {
-            (grid_pos.0 + grid_pos.1 * 32121).rem_euclid(len as i32) as usize
-        };
 
         for (i, (particle_i, hash_entry)) in objs.iter().zip(self.hash_table.iter_mut()).enumerate()
         {
@@ -65,12 +71,13 @@ impl SortMap {
                 pos[0].div_euclid(CELL_SIZE as f64) as i32,
                 pos[1].div_euclid(CELL_SIZE as f64) as i32,
             );
-            let cell_hash = hasher(grid_pos);
+            let cell_hash = Self::hash(grid_pos, len);
             hash_entry.particle_idx = i;
             hash_entry.cell_hash = cell_hash;
         }
         self.hash_table
             .sort_unstable_by_key(|entry| entry.cell_hash);
+
         for i in 0..objs.len() {
             let first = self
                 .hash_table
@@ -85,7 +92,9 @@ impl SortMap {
                 }
             }
         }
+    }
 
+    pub fn scan(&mut self, objs: &mut [Object], update_scanner: &mut impl UpdateScanner) {
         // Although it's not idiomatic, we need to borrow the reference to the object as mutable at the end of the loop,
         // so we cannot use iter().enumerate() idiom.
         for i in 0..objs.len() {
@@ -98,7 +107,7 @@ impl SortMap {
             update_scanner.start(i, obj_i);
             for cy in (grid_pos.1 - 1)..=(grid_pos.1 + 1) {
                 for cx in (grid_pos.0 - 1)..=(grid_pos.0 + 1) {
-                    let cell_hash = hasher((cx, cy));
+                    let cell_hash = Self::hash((cx, cy), objs.len());
                     let Some(&cell_start) = self.start_offsets.get(cell_hash) else {
                         continue;
                     };

@@ -1,9 +1,10 @@
 use clap::Parser;
 use eframe::{
-    egui::{self, Color32, Context, Frame},
+    egui::{self, Color32, Context, Frame, Ui},
     emath::Align2,
     epaint::FontId,
 };
+
 use std::{
     error::Error,
     mem::size_of,
@@ -15,13 +16,20 @@ use std::{
 };
 use zerocopy::FromBytes;
 
-use patchjuggler::{render_objects, Object};
+use patchjuggler::{
+    object::{BoidScanner, FindScanner},
+    render_objects, Object, SortMap, UpdateScanner,
+};
 
 struct Shared {
     args: Args,
     objs: Mutex<Vec<Object>>,
     total_amt: AtomicUsize,
     exit_signal: AtomicBool,
+    sort_map: Mutex<SortMap>,
+    selected_obj: Mutex<Option<usize>>,
+    find_result: Mutex<Vec<usize>>,
+    use_sort_map: AtomicBool,
 }
 
 #[derive(Parser, Clone, Debug)]
@@ -49,6 +57,10 @@ fn main() -> Result<(), String> {
         objs: Mutex::new(vec![]),
         total_amt: AtomicUsize::new(0),
         exit_signal: AtomicBool::new(false),
+        sort_map: Mutex::new(SortMap::new(0)),
+        selected_obj: Mutex::new(None),
+        find_result: Mutex::new(vec![]),
+        use_sort_map: AtomicBool::new(true),
     });
 
     let shared_copy = shared.clone();
@@ -96,6 +108,7 @@ fn receiver_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
                 .lock()
                 .unwrap()
                 .resize(num_objects, Object::default());
+            shared.sort_map.lock().unwrap().resize(num_objects);
             continue;
         }
         let buf = Object::ref_from(&buf[size_of::<usize>()..]).unwrap();
@@ -123,16 +136,64 @@ pub struct ReceiverApp {
     shared: Arc<Shared>,
 }
 
+impl ReceiverApp {
+    fn update_objs(&mut self) {
+        let mut objs = self.shared.objs.lock().unwrap();
+        // for obj in objs.iter_mut() {
+        //     obj.time_step();
+        // }
+        let mut sort_map = self.shared.sort_map.lock().unwrap();
+        let mut scanner = BoidScanner::new(None);
+        //*self.shared.selected_obj.lock().unwrap()
+        if self.shared.use_sort_map.load(Ordering::Relaxed) {
+            let mut find_scanner = FindScanner::new(*self.shared.selected_obj.lock().unwrap());
+            sort_map.update(&objs);
+            sort_map.scan(&mut objs, &mut scanner);
+            sort_map.scan(&mut objs, &mut find_scanner);
+            let mut find_result = self.shared.find_result.lock().unwrap();
+            *find_result = find_scanner.into_find_result();
+        } else {
+            for i in 0..objs.len() {
+                scanner.start(i, &objs[i]);
+                for (j, obj2) in objs.iter().enumerate() {
+                    if i == j {
+                        continue;
+                    }
+                    scanner.next(j, obj2);
+                }
+                scanner.end(i, &mut objs[i]);
+            }
+        }
+        // self.shared.find_result.lock().unwrap().clear();
+    }
+
+    fn ui_panel(&mut self, ui: &mut Ui) {
+        // ui.checkbox(&mut self.show_grid, "Show grid");
+        // ui.checkbox(&mut self.show_neighbors, "Show neighbors");
+        // ui.checkbox(&mut self.show_distances, "Show distances");
+        let mut use_sort_map = self.shared.use_sort_map.load(Ordering::Acquire);
+        ui.checkbox(&mut use_sort_map, "Use sort map");
+        self.shared
+            .use_sort_map
+            .store(use_sort_map, Ordering::Release);
+    }
+}
+
 impl eframe::App for ReceiverApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint();
 
+        self.update_objs();
+
+        egui::SidePanel::right("side_panel")
+            .min_width(200.)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.ui_panel(ui))
+            });
+
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
-                let mut objs = self.shared.objs.lock().unwrap();
-                for obj in objs.iter_mut() {
-                    obj.time_step();
-                }
+                let objs = self.shared.objs.lock().unwrap();
                 let (response, painter) = render_objects(&objs, None, ui);
                 drop(objs); // Release the mutex ASAP
 
