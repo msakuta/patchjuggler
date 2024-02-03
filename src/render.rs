@@ -5,11 +5,15 @@ use eframe::{
 
 use crate::{Object, SCALE};
 
-pub fn render_objects(
-    objs: &[Object],
+pub fn render_objects<T>(
+    objs: &[T],
     selected: Option<usize>,
     ui: &mut Ui,
-) -> (Response, Painter) {
+    get_color: impl Fn(&T) -> Color32,
+) -> (Response, Painter)
+where
+    T: AsRef<Object>,
+{
     let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click());
 
     let rotate = |pos: &Pos2, angle: f32| {
@@ -38,8 +42,9 @@ pub fn render_objects(
         let color = if Some(i) == selected {
             Color32::WHITE
         } else {
-            Color32::from_rgb(obj.color[0], obj.color[1], obj.color[2])
+            get_color(obj)
         };
+        let obj = obj.as_ref();
         // painter.circle(
         //     to_screen.transform_pos(pos2(obj.pos[0] as f32 * SCALE, obj.pos[1] as f32 * SCALE)),
         //     3.,

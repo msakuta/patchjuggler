@@ -65,12 +65,12 @@ impl SortMap {
         (grid_pos.0 + grid_pos.1 * 32121).rem_euclid(len as i32) as usize
     }
 
-    pub fn update(&mut self, objs: &[Object]) {
+    pub fn update(&mut self, objs: &[impl AsRef<Object>]) {
         let len = objs.len();
 
         for (i, (particle_i, hash_entry)) in objs.iter().zip(self.hash_table.iter_mut()).enumerate()
         {
-            let pos = particle_i.pos;
+            let pos = particle_i.as_ref().pos;
             let grid_pos = (
                 pos[0].div_euclid(CELL_SIZE as f64) as i32,
                 pos[1].div_euclid(CELL_SIZE as f64) as i32,
@@ -98,17 +98,21 @@ impl SortMap {
         }
     }
 
-    pub fn scan(&mut self, objs: &mut [Object], update_scanner: &mut impl UpdateScanner) {
+    pub fn scan(
+        &mut self,
+        objs: &mut [impl AsRef<Object> + AsMut<Object>],
+        update_scanner: &mut impl UpdateScanner,
+    ) {
         // Although it's not idiomatic, we need to borrow the reference to the object as mutable at the end of the loop,
         // so we cannot use iter().enumerate() idiom.
         for i in 0..objs.len() {
             let obj_i = &objs[i];
-            let pos = obj_i.pos;
+            let pos = obj_i.as_ref().pos;
             let grid_pos = (
                 pos[0].div_euclid(CELL_SIZE as f64) as i32,
                 pos[1].div_euclid(CELL_SIZE as f64) as i32,
             );
-            update_scanner.start(i, obj_i);
+            update_scanner.start(i, obj_i.as_ref());
             for cy in (grid_pos.1 - 1)..=(grid_pos.1 + 1) {
                 for cx in (grid_pos.0 - 1)..=(grid_pos.0 + 1) {
                     let cell_hash = Self::hash((cx, cy), objs.len());
@@ -126,12 +130,12 @@ impl SortMap {
                             break;
                         }
                         let obj_j = &objs[entry.particle_idx];
-                        update_scanner.next(entry.particle_idx, obj_j);
+                        update_scanner.next(entry.particle_idx, obj_j.as_ref());
                         // update_speed(obj_i, obj_j);
                     }
                 }
             }
-            update_scanner.end(i, &mut objs[i]);
+            update_scanner.end(i, objs[i].as_mut());
         }
     }
 

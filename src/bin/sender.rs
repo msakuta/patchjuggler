@@ -269,6 +269,7 @@ impl SenderApp {
             &self.shared.objs.lock().unwrap(),
             *self.shared.selected_obj.lock().unwrap(),
             ui,
+            |obj| Color32::from_rgb(obj.color[0], obj.color[1], obj.color[2]),
         );
 
         let to_screen = egui::emath::RectTransform::from_to(

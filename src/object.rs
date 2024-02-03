@@ -55,6 +55,58 @@ impl Object {
     }
 }
 
+impl AsRef<Object> for Object {
+    fn as_ref(&self) -> &Object {
+        self
+    }
+}
+
+impl AsMut<Object> for Object {
+    fn as_mut(&mut self) -> &mut Object {
+        self
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ObjectWrap {
+    obj: Object,
+    updated: std::time::Instant,
+}
+
+impl ObjectWrap {
+    pub fn new(obj: Object) -> Self {
+        Self {
+            obj,
+            updated: std::time::Instant::now(),
+        }
+    }
+
+    pub fn updated(&self) -> std::time::Instant {
+        self.updated
+    }
+}
+
+impl AsRef<Object> for ObjectWrap {
+    fn as_ref(&self) -> &Object {
+        &self.obj
+    }
+}
+
+impl AsMut<Object> for ObjectWrap {
+    fn as_mut(&mut self) -> &mut Object {
+        &mut self.obj
+    }
+}
+
+impl Default for ObjectWrap {
+    fn default() -> Self {
+        Self {
+            obj: Object::default(),
+            updated: std::time::Instant::now(),
+        }
+    }
+}
+
 /// A scanner to update the behavior of objects as boids.
 /// It requires other objects' information, so it is a O(N^2) operation naively, which
 /// turns into O(N*M), where M is the average number of other objects in the SortMap.

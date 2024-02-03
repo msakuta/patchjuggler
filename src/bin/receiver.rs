@@ -18,7 +18,7 @@ use zerocopy::FromBytes;
 
 use patchjuggler::{
     object::{
-        BoidScanner, FindScanner, ALIGNMENT_DIST, GROUP_SEPARATION_DIST, RANDOM_MOTION,
+        BoidScanner, FindScanner, ObjectWrap, ALIGNMENT_DIST, GROUP_SEPARATION_DIST, RANDOM_MOTION,
         SEPARATION_DIST,
     },
     render_objects, Object, SortMap, UpdateScanner, SCALE,
@@ -28,7 +28,7 @@ pub const SELECT_RADIUS: f32 = 0.5;
 
 struct Shared {
     args: Args,
-    objs: Mutex<Vec<Object>>,
+    objs: Mutex<Vec<ObjectWrap>>,
     total_amt: AtomicUsize,
     exit_signal: AtomicBool,
     sort_map: Mutex<SortMap>,
@@ -119,7 +119,7 @@ fn receiver_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
                 .objs
                 .lock()
                 .unwrap()
-                .resize(num_objects, Object::default());
+                .resize(num_objects, ObjectWrap::default());
             shared.sort_map.lock().unwrap().resize(num_objects);
             continue;
         }
@@ -129,7 +129,7 @@ fn receiver_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
 
         let mut objs = shared.objs.lock().unwrap();
         if i - 1 < objs.len() {
-            objs[i - 1] = *buf;
+            objs[i - 1] = ObjectWrap::new(*buf);
             // if i == 0 {
             //     println!(
             //         "[{t}]: Received {amt1} bytes from {_src:?}: {i} = {:?}!",
@@ -165,14 +165,14 @@ impl ReceiverApp {
             *find_result = find_scanner.into_find_result();
         } else {
             for i in 0..objs.len() {
-                scanner.start(i, &objs[i]);
+                scanner.start(i, objs[i].as_ref());
                 for (j, obj2) in objs.iter().enumerate() {
                     if i == j {
                         continue;
                     }
-                    scanner.next(j, obj2);
+                    scanner.next(j, obj2.as_ref());
                 }
-                scanner.end(i, &mut objs[i]);
+                scanner.end(i, objs[i].as_mut());
             }
         }
     }
@@ -180,7 +180,16 @@ impl ReceiverApp {
     fn render(&mut self, ui: &mut Ui) {
         let objs = self.shared.objs.lock().unwrap();
         let (response, painter) =
-            render_objects(&objs, *self.shared.selected_obj.lock().unwrap(), ui);
+            render_objects(&objs, *self.shared.selected_obj.lock().unwrap(), ui, |o| {
+                let obj = o.as_ref();
+                let age = std::time::Instant::now() - o.updated();
+                let modulation = age.as_secs_f64();
+                Color32::from_rgb(
+                    (obj.color[0] as f64 * (1. - modulation)).clamp(0., 255.) as u8,
+                    (obj.color[1] as f64 * (1. - modulation)).clamp(0., 255.) as u8,
+                    (obj.color[2] as f64 * (1. - modulation)).clamp(0., 255.) as u8,
+                )
+            });
         drop(objs); // Release the mutex ASAP
 
         let to_screen = egui::emath::RectTransform::from_to(
@@ -199,7 +208,8 @@ impl ReceiverApp {
                 let closest_obj = self.shared.objs.lock().unwrap().iter().enumerate().fold(
                     None,
                     |acc: Option<(f32, usize)>, cur| {
-                        let dist = (pos - pos2(cur.1.pos[0] as f32, cur.1.pos[1] as f32)).length();
+                        let cur_pos = cur.1.as_ref().pos;
+                        let dist = (pos - pos2(cur_pos[0] as f32, cur_pos[1] as f32)).length();
                         if let Some(acc) = acc {
                             if dist < SELECT_RADIUS && dist < acc.0 {
                                 Some((dist, cur.0))
@@ -221,9 +231,9 @@ impl ReceiverApp {
             if let Some(selected_obj) = *self.shared.selected_obj.lock().unwrap() {
                 let objs = self.shared.objs.lock().unwrap();
                 if let Ok(first_result) = self.shared.find_result.lock() {
-                    let pos0 = objs[selected_obj].pos;
+                    let pos0 = objs[selected_obj].as_ref().pos;
                     for j in first_result.iter() {
-                        let pos_j = objs[*j].pos;
+                        let pos_j = objs[*j].as_ref().pos;
                         painter.line_segment(
                             [
                                 to_screen.transform_pos(pos2(
@@ -244,7 +254,7 @@ impl ReceiverApp {
 
         if self.show_distances {
             if let Some(&selected_obj) = self.shared.selected_obj.lock().unwrap().as_ref() {
-                let pos = self.shared.objs.lock().unwrap()[selected_obj].pos;
+                let pos = self.shared.objs.lock().unwrap()[selected_obj].as_ref().pos;
                 for (dist, color) in [
                     (SEPARATION_DIST, Color32::from_rgb(255, 0, 255)),
                     (ALIGNMENT_DIST, Color32::from_rgb(0, 127, 127)),
@@ -262,7 +272,10 @@ impl ReceiverApp {
         if self.show_grid {
             let objs = self.shared.objs.lock().unwrap();
             SortMap::render_grid(
-                objs.iter().map(|o| [o.pos[0] as f32, o.pos[1] as f32]),
+                objs.iter().map(|o| {
+                    let pos = o.as_ref().pos;
+                    [pos[0] as f32, pos[1] as f32]
+                }),
                 &response,
                 &painter,
             );
