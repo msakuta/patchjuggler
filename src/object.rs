@@ -1,3 +1,4 @@
+use eframe::epaint::Color32;
 use rand::{rngs::ThreadRng, Rng};
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes};
 
@@ -8,6 +9,11 @@ const WALL_REPULSION_DIST: f64 = 0.5;
 const MIN_SPEED: f64 = 0.25;
 const MAX_SPEED: f64 = 0.5;
 const SPEED_ADAPT: f64 = 1e-2;
+
+pub trait AsObject: AsRef<Object> + AsMut<Object> {
+    fn get_color(&self) -> Color32;
+    fn render_circle(&self) -> Option<Color32>;
+}
 
 #[derive(Clone, Copy, Debug, Default, FromZeroes, FromBytes, AsBytes)]
 #[repr(C)]
@@ -67,43 +73,13 @@ impl AsMut<Object> for Object {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct ObjectWrap {
-    obj: Object,
-    updated: std::time::Instant,
-}
-
-impl ObjectWrap {
-    pub fn new(obj: Object) -> Self {
-        Self {
-            obj,
-            updated: std::time::Instant::now(),
-        }
+impl AsObject for Object {
+    fn get_color(&self) -> Color32 {
+        Color32::from_rgb(self.color[0], self.color[1], self.color[2])
     }
 
-    pub fn updated(&self) -> std::time::Instant {
-        self.updated
-    }
-}
-
-impl AsRef<Object> for ObjectWrap {
-    fn as_ref(&self) -> &Object {
-        &self.obj
-    }
-}
-
-impl AsMut<Object> for ObjectWrap {
-    fn as_mut(&mut self) -> &mut Object {
-        &mut self.obj
-    }
-}
-
-impl Default for ObjectWrap {
-    fn default() -> Self {
-        Self {
-            obj: Object::default(),
-            updated: std::time::Instant::now(),
-        }
+    fn render_circle(&self) -> Option<Color32> {
+        None
     }
 }
 

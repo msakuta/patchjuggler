@@ -3,17 +3,14 @@ use eframe::{
     epaint::{pos2, vec2, Color32, PathShape, Pos2, Rect},
 };
 
-use crate::{Object, SCALE};
+use crate::{object::AsObject, SCALE};
 
-pub fn render_objects<T>(
-    objs: &[T],
+pub fn render_objects(
+    objs: &[impl AsObject],
     selected: Option<usize>,
     ui: &mut Ui,
-    get_color: impl Fn(&T) -> Color32,
-) -> (Response, Painter)
-where
-    T: AsRef<Object>,
-{
+    show_updates: bool,
+) -> (Response, Painter) {
     let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click());
 
     let rotate = |pos: &Pos2, angle: f32| {
@@ -38,19 +35,27 @@ where
         )
     };
 
-    for (i, obj) in objs.iter().enumerate() {
+    if show_updates {
+        for as_obj in objs.iter() {
+            let obj = as_obj.as_ref();
+            if let Some(fcolor) = as_obj.render_circle() {
+                painter.circle_filled(
+                    to_screen
+                        .transform_pos(pos2(obj.pos[0] as f32 * SCALE, obj.pos[1] as f32 * SCALE)),
+                    15.,
+                    fcolor,
+                );
+            }
+        }
+    }
+
+    for (i, as_obj) in objs.iter().enumerate() {
+        let obj = as_obj.as_ref();
         let color = if Some(i) == selected {
             Color32::WHITE
         } else {
-            get_color(obj)
+            as_obj.get_color()
         };
-        let obj = obj.as_ref();
-        // painter.circle(
-        //     to_screen.transform_pos(pos2(obj.pos[0] as f32 * SCALE, obj.pos[1] as f32 * SCALE)),
-        //     3.,
-        //     color,
-        //     (1., Color32::BLACK),
-        // );
         let heading = obj.velo[1].atan2(obj.velo[0]) as f32;
         painter.add(convert_to_poly(
             &[pos2(10., 0.), pos2(-5., 5.), pos2(-5., -5.)],

@@ -18,10 +18,10 @@ use zerocopy::FromBytes;
 
 use patchjuggler::{
     object::{
-        BoidScanner, FindScanner, ObjectWrap, ALIGNMENT_DIST, GROUP_SEPARATION_DIST, RANDOM_MOTION,
+        BoidScanner, FindScanner, ALIGNMENT_DIST, GROUP_SEPARATION_DIST, RANDOM_MOTION,
         SEPARATION_DIST,
     },
-    render_objects, Object, SortMap, UpdateScanner, SCALE,
+    render_objects, Object, ObjectWrap, SortMap, UpdateScanner, SCALE,
 };
 
 pub const SELECT_RADIUS: f32 = 0.5;
@@ -97,6 +97,7 @@ fn gui_thread(shared: Arc<Shared>) -> Result<(), Box<dyn Error>> {
                 show_grid: true,
                 show_neighbors: true,
                 show_distances: true,
+                show_updates: true,
             })
         }),
     )?)
@@ -149,6 +150,7 @@ pub struct ReceiverApp {
     show_grid: bool,
     show_neighbors: bool,
     show_distances: bool,
+    show_updates: bool,
 }
 
 impl ReceiverApp {
@@ -179,17 +181,12 @@ impl ReceiverApp {
 
     fn render(&mut self, ui: &mut Ui) {
         let objs = self.shared.objs.lock().unwrap();
-        let (response, painter) =
-            render_objects(&objs, *self.shared.selected_obj.lock().unwrap(), ui, |o| {
-                let obj = o.as_ref();
-                let age = std::time::Instant::now() - o.updated();
-                let modulation = age.as_secs_f64();
-                Color32::from_rgb(
-                    (obj.color[0] as f64 * (1. - modulation)).clamp(0., 255.) as u8,
-                    (obj.color[1] as f64 * (1. - modulation)).clamp(0., 255.) as u8,
-                    (obj.color[2] as f64 * (1. - modulation)).clamp(0., 255.) as u8,
-                )
-            });
+        let (response, painter) = render_objects(
+            &objs,
+            *self.shared.selected_obj.lock().unwrap(),
+            ui,
+            self.show_updates,
+        );
         drop(objs); // Release the mutex ASAP
 
         let to_screen = egui::emath::RectTransform::from_to(
@@ -297,6 +294,7 @@ impl ReceiverApp {
         ui.checkbox(&mut self.show_grid, "Show grid");
         ui.checkbox(&mut self.show_neighbors, "Show neighbors");
         ui.checkbox(&mut self.show_distances, "Show distances");
+        ui.checkbox(&mut self.show_updates, "Show update as flashing circles");
         let mut use_sort_map = self.shared.use_sort_map.load(Ordering::Acquire);
         ui.checkbox(&mut use_sort_map, "Use sort map");
         self.shared

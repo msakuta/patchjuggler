@@ -83,7 +83,7 @@ struct Args {
     #[clap(
         short = 'b',
         long,
-        default_value = "1000",
+        default_value = "10",
         help = "The number of objects to send in one burst. Having a low value helps GUI to run smoothly but will have overhead sending patches"
     )]
     burst_objs: usize,
@@ -269,7 +269,7 @@ impl SenderApp {
             &self.shared.objs.lock().unwrap(),
             *self.shared.selected_obj.lock().unwrap(),
             ui,
-            |obj| Color32::from_rgb(obj.color[0], obj.color[1], obj.color[2]),
+            false,
         );
 
         let to_screen = egui::emath::RectTransform::from_to(
