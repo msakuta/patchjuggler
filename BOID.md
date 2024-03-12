@@ -14,6 +14,7 @@ f_{\alpha,i} = \begin{cases}
 0 & \mathrm{otherwise}
 \end{cases}
 $$
+
 where $p_i$ is the position of $i$-th object, $R_\alpha$ the maximum distance parameter, and $\alpha$ a factor of force applied by this term.
 
 * Alignment
@@ -27,6 +28,7 @@ f_{\beta,i} = \begin{cases}
 0 & \mathrm{otherwise}
 \end{cases}
 $$
+
 wher $\beta$ is a factor parameter.
 
 * Cohesion
@@ -40,6 +42,7 @@ f_{\gamma,i} = \begin{cases}
 0 & \mathrm{otherwise}
 \end{cases}
 $$
+
 where $\gamma$ is a factor parameter.
 
 ## The fourth term (group separation)
@@ -56,6 +59,7 @@ f_{\delta,i} = \begin{cases}
 0 & \mathrm{otherwise}
 \end{cases}
 $$
+
 where $\delta$ is a parameter.
 
 ## Putting all together
@@ -72,4 +76,5 @@ $$
 v_i \leftarrow v_i + f_i \\
 p_i \leftarrow p_i + \Delta v_i
 $$
+
 where $\Delta$ is a delta-time parameter.
